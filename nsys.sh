@@ -1,0 +1,2 @@
+nsys profile --stats=true --gpu-metrics-device=all
+# /opt/nvidia/nsight-compute/2023.2.0/target/linux-desktop-glibc_2_11_3-x64/ncu --export ./profiling-ec-mul-with-batchadd-2-18-20 --force-overwrite --target-processes application-only --replay-mode application --launch-skip-before-match 0 --set full --sampling-interval auto --sampling-max-passes 3 --sampling-buffer-size 33554432 --nvtx --profile-from-start 1 --cache-control all --clock-control base --apply-rules yes --import-source yes --check-exit-code yes target/release/deps/msm-37d1d7fe45b804da batchadd_mixedadd_perf_test

@@ -1,0 +1,1 @@
+nvcc -cudart shared ckks23_demo.cu -o ckks23_demo -O3 -lntl -lgmp -ftz=true -prec-div=true

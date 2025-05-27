@@ -1,1 +1,1 @@
-# ckks_llm
+# ckks_mma_ringpacking
