@@ -5,7 +5,7 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <unistd.h>
-#include "TimeUtils.cuh"
+#include "../ckks/include/TimeUtils.cuh"
 
 class opt_model {
 public:

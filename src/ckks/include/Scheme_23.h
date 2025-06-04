@@ -65,7 +65,7 @@ public:
 
 	void mallocMemory();
 	
-	void decrypt_display(SecretKey& sk, Ciphertext& cipher, char* s);
+	void decrypt_display(SecretKey& sk, Ciphertext& cipher, char* s, int row_num = 32768);
 
 	/**
 	 * generates key for public encryption (key is stored in publicKey)
@@ -101,12 +101,12 @@ public:
 	// void addLeftRotKeys(SecretKey& secretKey);
 	// void addRightRotKeys(SecretKey& secretKey);
 
-    // l+1 = num of q
-	Plaintext encode(double* vals, long slots, long l, cudaStream_t stream = 0);
-    // l+1 = num of q
-	Plaintext encode(cuDoubleComplex* vals, long slots, long l, cudaStream_t stream = 0); 
+    // // l+1 = num of q
+	// Plaintext encode(double* vals, long slots, long l, cudaStream_t stream = 0);
+    // // l+1 = num of q
+	// Plaintext encode(cuDoubleComplex* vals, long slots, long l, cudaStream_t stream = 0); 
 
-	cuDoubleComplex* decode(Plaintext& msg, cudaStream_t stream = 0);
+	// cuDoubleComplex* decode(Plaintext& msg, cudaStream_t stream = 0);
 
 
     // using keyMap[ENCRYPTION] as pk
@@ -162,8 +162,8 @@ public:
 
 	//Homomorphic <Hoisting Rotation> Rotate
 	void leftRotateAndEqual_23(Ciphertext& cipher, long rotSlots);
-	void leftRotateAndEqual_23_noNTT(Ciphertext &cipher, long rotSlots);
-	// void leftRotate_23(Ciphertext& cipher, Ciphertext& cipher_res, long rotSlots);
+	void leftRotateAddSelf_23(Ciphertext& cipher, long rotSlots);
+	void leftRotate_23(Ciphertext& cipher_res, Ciphertext& cipher, long rotSlots);
 	// void leftRotateMany_23(Ciphertext& cipher, Ciphertext* cipher_res, vector<int> rotSlotsVec);
 	void rightRotateAndEqual_23(Ciphertext& cipher, long rotSlots);
 	// void rightRotate_23(Ciphertext& cipher, Ciphertext& cipher_res, long rotSlots);

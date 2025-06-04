@@ -522,7 +522,7 @@ void Scheme_23::leftRotateAndEqual_23(Ciphertext &cipher, long rotSlots)
 
     Key_decomp *rotKey_23 = rotKey_vec_23[rotSlots];
 
-    context.FromNTTInplace(cipher.cipher_device, 0, K, 2, l + 1, L + 1);
+    context.FromNTTInplace(cipher.ax_device, 0, K, 1, l + 1, L + 1);
     // a_conj zeroPadding
     context.modUpQjtoT_23(modUp_QjtoT_temp, cipher.ax_device, l, 1);
     context.ToNTTInplace(modUp_QjtoT_temp, 0, K + L + 1, cipher_blockNum, t_num, t_num);
@@ -533,12 +533,85 @@ void Scheme_23::leftRotateAndEqual_23(Ciphertext &cipher, long rotSlots)
     context.modUpTtoPQl_23(modUp_TtoQj_buffer, exProduct_T_temp, l, 2);
     context.modDownPQltoQl_23(cipher_temp_pool->cipher_device, modUp_TtoQj_buffer, l, 2);
     
-    poly_add_batch_device(cipher_temp_pool->bx_device, cipher.bx_device, N, 0, 0, K, l+1);
-    sk_and_poly_LeftRot_double(cipher.cipher_device, cipher_temp_pool->cipher_device, context.rotGroups_device, N, K, L+1, rotSlots, 0, 0, l+1);
+    // poly_add_batch_device(cipher_temp_pool->bx_device, cipher.bx_device, N, 0, 0, K, l+1);
+    // sk_and_poly_LeftRot_double(cipher.cipher_device, cipher_temp_pool->cipher_device, context.rotGroups_device, N, K, L+1, rotSlots, 0, 0, l+1);
     
-    context.ToNTTInplace(cipher.cipher_device, 0, K, 2, l+1, L+1);
-    // context.ToNTTInplace(cipher_temp_pool->cipher_device, 0, K, 2, l+1, L+1);
-    // sk_and_poly_LeftRot_ntt_double(cipher.cipher_device, cipher_temp_pool->cipher_device, context.rotGroups_device, N, K, L+1, rotSlots, 0, 0, l+1);
+    // context.ToNTTInplace(cipher.cipher_device, 0, K, 2, l+1, L+1);
+
+    context.ToNTTInplace(cipher_temp_pool->cipher_device, 0, K, 2, l+1, L+1);
+    poly_add_batch_device(cipher_temp_pool->bx_device, cipher.bx_device, N, 0, 0, K, l+1);
+
+    sk_and_poly_LeftRot_ntt_double(cipher.cipher_device, cipher_temp_pool->cipher_device, context.rotGroups_device, N, K, L+1, rotSlots, 0, 0, l+1);
+}
+
+void Scheme_23::leftRotate_23(Ciphertext& cipher_res, Ciphertext& cipher, long rotSlots)
+{
+    if (rotKey_vec_23[rotSlots] == nullptr)
+    {
+        throw invalid_argument("rotKey_23 not exists");
+    }
+    int N = context.N;
+    int l = cipher.l;
+    int L = context.L;
+    int K = context.K;
+    int t_num = context.t_num;
+    int Ri_blockNum = context.Ri_blockNum;
+    int swk_blockNum = ceil(double(K + l + 1) / context.gamma);
+    int cipher_blockNum = ceil(double(l + 1) / K);
+
+    Key_decomp *rotKey_23 = rotKey_vec_23[rotSlots];
+
+    context.FromNTTInplace(cipher.ax_device, 0, K, 1, l + 1, L + 1);
+    // a_conj zeroPadding
+    context.modUpQjtoT_23(modUp_QjtoT_temp, cipher.ax_device, l, 1);
+    context.ToNTTInplace(modUp_QjtoT_temp, 0, K + L + 1, cipher_blockNum, t_num, t_num);
+    context.ToNTTInplace(cipher.ax_device, 0, K, 1, l + 1, L + 1);
+
+    context.external_product_T(exProduct_T_temp, modUp_QjtoT_temp, rotKey_23->cipher_device, l);
+    context.FromNTTInplace_for_externalProduct(exProduct_T_temp, 0, K + L + 1, swk_blockNum, t_num, t_num, Ri_blockNum*t_num, 2);
+
+    context.modUpTtoPQl_23(modUp_TtoQj_buffer, exProduct_T_temp, l, 2);
+    context.modDownPQltoQl_23(cipher_temp_pool->cipher_device, modUp_TtoQj_buffer, l, 2);
+    
+    context.ToNTTInplace(cipher_temp_pool->cipher_device, 0, K, 2, l+1, L+1);
+    poly_add_batch_device(cipher_temp_pool->bx_device, cipher.bx_device, N, 0, 0, K, l+1);
+
+    sk_and_poly_LeftRot_ntt_double(cipher_res.cipher_device, cipher_temp_pool->cipher_device, context.rotGroups_device, N, K, L+1, rotSlots, 0, 0, l+1);
+}
+
+void Scheme_23::leftRotateAddSelf_23(Ciphertext& cipher, long rotSlots)
+{
+    if (rotKey_vec_23[rotSlots] == nullptr)
+    {
+        throw invalid_argument("rotKey_23 not exists");
+    }
+    int N = context.N;
+    int l = cipher.l;
+    int L = context.L;
+    int K = context.K;
+    int t_num = context.t_num;
+    int Ri_blockNum = context.Ri_blockNum;
+    int swk_blockNum = ceil(double(K + l + 1) / context.gamma);
+    int cipher_blockNum = ceil(double(l + 1) / K);
+
+    Key_decomp *rotKey_23 = rotKey_vec_23[rotSlots];
+
+    context.FromNTTInplace(cipher.ax_device, 0, K, 1, l + 1, L + 1);
+    // a_conj zeroPadding
+    context.modUpQjtoT_23(modUp_QjtoT_temp, cipher.ax_device, l, 1);
+    context.ToNTTInplace(modUp_QjtoT_temp, 0, K + L + 1, cipher_blockNum, t_num, t_num);
+
+    context.external_product_T(exProduct_T_temp, modUp_QjtoT_temp, rotKey_23->cipher_device, l);
+    context.FromNTTInplace_for_externalProduct(exProduct_T_temp, 0, K + L + 1, swk_blockNum, t_num, t_num, Ri_blockNum*t_num, 2);
+
+    context.modUpTtoPQl_23(modUp_TtoQj_buffer, exProduct_T_temp, l, 2);
+    context.modDownPQltoQl_23(cipher_temp_pool->cipher_device, modUp_TtoQj_buffer, l, 2);
+    
+    context.ToNTTInplace(cipher_temp_pool->cipher_device, 0, K, 2, l+1, L+1);
+    poly_add_batch_device(cipher_temp_pool->bx_device, cipher.bx_device, N, 0, 0, K, l+1);
+
+    context.ToNTTInplace(cipher.ax_device, 0, K, 1, l + 1, L + 1);
+    sk_and_poly_LeftRot_Add_ntt_double(cipher.cipher_device, cipher_temp_pool->cipher_device, context.rotGroups_device, N, K, L+1, rotSlots, 0, 0, l+1);
 }
 
 void Scheme_23::rightRotateAndEqual_23(Ciphertext &cipher, long rotSlots)

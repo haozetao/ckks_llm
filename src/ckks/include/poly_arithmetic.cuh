@@ -556,6 +556,35 @@ __host__ void sk_and_poly_LeftRot_ntt_double(uint64_tt* device_a, uint64_tt* dev
     sk_and_poly_LeftRot_ntt_kernel <<< leftrot_dim, poly_block >>> (device_a, device_b, rotGroup, n, logn, p_num, q_num, rot_num, idx_a, idx_b);
 }
 
+__global__
+__launch_bounds__(
+    POLY_MAX_THREADS, 
+    POLY_MIN_BLOCKS) 
+void sk_and_poly_LeftRot_Add_ntt_kernel(uint64_tt* device_a, uint64_tt* device_b,  uint64_tt*rotGroup, uint32_tt n, uint32_tt logNthRoot, uint32_tt p_num, uint32_tt q_num, uint32_tt rot_num, int idx_a, int idx_b)
+{
+    register uint32_tt idx_in_pq = blockIdx.y;
+    register uint32_tt idx_in_cipher = blockIdx.z;
+	register long pow = rotGroup[(n>>1) - rot_num];
+	register uint64_tt* ai = device_a + (idx_a + idx_in_pq + idx_in_cipher * q_num) * n;
+	register uint64_tt* bi = device_b + (idx_b + idx_in_pq + idx_in_cipher * q_num) * n;
+	register int global_tid = blockIdx.x * poly_block + threadIdx.x;
+
+	int mask = 2 * n - 1;
+    int tmp1 = 2*bitReverse(global_tid, logNthRoot) + 1;
+	tmp1 = ((pow * tmp1 & mask) - 1) >> 1;
+    tmp1 = bitReverse(tmp1, logNthRoot);
+
+    register uint64_tt ra = ai[tmp1] + bi[global_tid];
+    csub_q(ra, pqt_cons[idx_in_pq + p_num]);
+    ai[tmp1] = ra;
+}
+
+__host__ void sk_and_poly_LeftRot_Add_ntt_double(uint64_tt* device_a, uint64_tt* device_b, uint64_tt* rotGroup, uint32_tt n, uint32_tt p_num, uint32_tt q_num, uint32_tt rot_num, int idx_a, int idx_b, int mod_num)
+{
+    dim3 leftrot_dim(n / poly_block, mod_num, 2);
+    int logn = log2(n);
+    sk_and_poly_LeftRot_Add_ntt_kernel <<< leftrot_dim, poly_block >>> (device_a, device_b, rotGroup, n, logn, p_num, q_num, rot_num, idx_a, idx_b);
+}
 
 __global__
 __launch_bounds__(
@@ -602,6 +631,48 @@ __host__ void sk_and_poly_conjugate(uint64_tt* device_a, uint64_tt* device_b, ui
 { 
     dim3 conjugate_dim(n / poly_block , mod_num);
     sk_and_poly_conjugate_kernel <<< conjugate_dim, poly_block >>> (device_a, device_b, n, q_num, idx_a, idx_b);
+}
+
+__global__ 
+__launch_bounds__(
+    POLY_MAX_THREADS, 
+    POLY_MIN_BLOCKS) 
+void mult_const_offset_kernel(uint64_tt ax[], const uint64_tt mx[], uint32_tt n, int logNthRoot, int rot_num, int idx_mod, int mod_num, int q_num, uint64_tt* rotGroup)
+{
+    register uint32_tt idx_in_pq = blockIdx.y;
+    register uint64_tt q = pqt_cons[idx_in_pq + idx_mod];
+    register uint128_tt mu(pqt_mu_cons_high[idx_in_pq + idx_mod], pqt_mu_cons_low[idx_in_pq + idx_mod]);
+
+    register int global_tid = blockIdx.x * poly_block + threadIdx.x;
+    register int i = global_tid + idx_in_pq * n;
+
+	int mask = 2 * n - 1;
+    int tmp1 = 2*bitReverse(global_tid, logNthRoot) + 1;
+	register long pow = rotGroup[(n>>1) - rot_num];
+	tmp1 = ((pow * tmp1 & mask) - 1) >> 1;
+    tmp1 = bitReverse(tmp1, logNthRoot);
+
+    register uint64_tt ra = ax[global_tid + idx_in_pq * n];
+    register uint64_tt rb = mx[tmp1 + idx_in_pq * n];
+
+    register uint128_tt rc;
+
+    mul64(ra, rb, rc);
+    singleBarrett_new(rc, q, mu);
+    ax[global_tid + idx_in_pq * n]=rc.low;
+
+    ra = ax[global_tid + idx_in_pq * n + q_num*n];
+    mul64(ra, rb, rc);
+    singleBarrett_new(rc, q, mu);
+
+    ax[global_tid + idx_in_pq * n + q_num*n]=rc.low;
+}
+
+__host__ void mult_const_offset_device(uint64_tt a[], const uint64_tt b[], uint32_tt n, int rot_num, int idx_mod, int mod_num, int q_num, uint64_tt* rotGroup)
+{
+    int logn = log2(n);
+    dim3 barrett_dim(n / poly_block, mod_num);
+    mult_const_offset_kernel <<< barrett_dim, poly_block >>> (a, b, n, logn, rot_num, idx_mod, mod_num, q_num, rotGroup);
 }
 
 __global__

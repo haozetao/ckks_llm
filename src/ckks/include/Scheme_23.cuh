@@ -453,20 +453,28 @@ void Scheme_23::divByPo2AndEqual(Ciphertext& cipher)
     divByPo2_device_kernel<<< div_dim, poly_block >>>(cipher.cipher_device, N, L+1);
 }
 
-void Scheme_23::decrypt_display(SecretKey& sk, Ciphertext& cipher, char* s)
+void Scheme_23::decrypt_display(SecretKey& sk, Ciphertext& cipher, char* s, int row_num)
 {
     int N = context.N;
     int K = context.K;
     int l = cipher.l;
     int L = context.L;
+    int slots = context.slots;
     Plaintext plain(N, L, L, context.slots, NTL::RR(context.precision));
     decryptMsg(plain, sk, cipher);
 
-    cuDoubleComplex* vals;
-    cudaMalloc(&vals, sizeof(cuDoubleComplex) * cipher.slots);
-    context.decode(plain, vals);
+    context.decode(plain, context.encode_buffer);
     cout<<s<<" cipher scale: "<<cipher.scale<<endl;
-    print_device_array(vals, cipher.slots, s);
-    cudaFree(vals);
-    // print_device_array(plain.mx_device, N, plain.l, "mx_device");
+    // print_device_array(context.encode_buffer, cipher.slots, s);
+    cuDoubleComplex* array_PQ = new cuDoubleComplex[slots];
+    cudaDeviceSynchronize();
+    cudaMemcpy(array_PQ, context.encode_buffer, sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);
+    printf("data = [");
+    for(int i = 0; i < slots/2; i++)
+    {
+        if(i % row_num == 0) printf("%d :  ", i / row_num);
+        printf("%lf, ", array_PQ[i].x);
+        if(i % row_num == row_num - 1) printf("\n");
+    }
+    delete array_PQ;
 }
