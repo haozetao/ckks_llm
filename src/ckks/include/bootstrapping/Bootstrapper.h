@@ -53,6 +53,8 @@ public:
 	NTL::RR sqrt2Pi;
 	vector<double> eval_sine_chebyshev_coeff;
 
+	vector<Chebyshev_Polynomial*> eval_sine_chebyshev_poly_pool;
+
 	// |m|
 	double message_ratio;
 	// sine degree of evalmod1

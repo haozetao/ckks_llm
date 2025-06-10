@@ -121,6 +121,7 @@ class Context_23{
 
 	vector<double> eval_sine_chebyshev_coeff;
 	int double_angle_cost_level;
+	int eval_sine_K;
 
 	/************************************base convert from PQl to Ql****************************************/
 		// P/pk					

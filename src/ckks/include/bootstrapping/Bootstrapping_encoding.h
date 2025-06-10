@@ -109,6 +109,9 @@ public:
     int levelBudgetEnc;
     int levelBudgetDec;
     int is_STC_first;
+    int is_sqrt_rescale;
+    int rescale_times;
+    NTL::RR sqrt_rescale;
 
     vector<vector<PlaintextT*>> m_U0hatTPreFFT; //CTS预处理矩阵
     vector<vector<PlaintextT*>> m_U0PreFFT; //STC预处理矩阵

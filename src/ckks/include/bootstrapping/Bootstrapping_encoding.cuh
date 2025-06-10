@@ -45,11 +45,6 @@ EncodingMatrix::EncodingMatrix(SecretKey &secretKey, Scheme_23 &scheme, int leve
     cout<<"m_paramsDec gs: "<<m_paramsDec[5]<<endl;
     cout<<"m_paramsDec gsRem: "<<m_paramsDec[8]<<endl;
 
-    // cout<<"m_paramsEnc bs: "<<m_paramsEnc[4]<<endl;
-    // cout<<"m_paramsEnc bsRem: "<<m_paramsEnc[7]<<endl;
-    // cout<<"m_paramsDec bs: "<<m_paramsDec[4]<<endl;
-    // cout<<"m_paramsDec bsRem: "<<m_paramsDec[7]<<endl;
-    
     cudaMalloc(&cipher_buffer_PQ, sizeof(uint64_tt) * N * (p_num + q_num) * 2);
     cudaMalloc(&gs_cipher_T, sizeof(uint64_tt) * N * t_num * Ri_blockNum * 2 * gs);
     cudaMalloc(&PQ_to_T_temp, sizeof(uint64_tt) * N * t_num * Ri_blockNum * 2);
@@ -67,8 +62,29 @@ EncodingMatrix::EncodingMatrix(SecretKey &secretKey, Scheme_23 &scheme, int leve
     // m_U0hatTPreFFT = EvalCoeffsToSlotsPrecompute(A, rotGroup, false, NTL::RR(scheme.context.precision), scheme.context.q_num - 1);
     // m_U0PreFFT     = EvalSlotsToCoeffsPrecompute(A, rotGroup, false, NTL::RR(scheme.context.precision), scheme.context.q_num - levelBudgetEnc - 2 - 6);
 
-    m_U0PreFFT     = EvalSlotsToCoeffsPrecompute(A, rotGroup, false, NTL::RR(scheme.context.precision), scheme.context.q_num - 1);
-    m_U0hatTPreFFT = EvalCoeffsToSlotsPrecompute(A, rotGroup, false, NTL::RR(scheme.context.precision), scheme.context.q_num - 1 - 3);
+    if(levelBudgetEnc == 4)
+    {
+        is_sqrt_rescale = 1;
+        rescale_times = 3;
+    }
+    else {
+        is_sqrt_rescale = 0;
+        rescale_times = levelBudgetEnc;
+    }
+    
+    if(is_sqrt_rescale)
+    {
+        sqrt_rescale = NTL::RR(pow(scheme.context.precision, rescale_times/4.));
+        // sqrt_rescale = NTL::RR(pow(scheme.context.precision, 1./2));
+
+        cout<<"sqrt_rescale: "<<sqrt_rescale<<endl;
+    }
+    else
+    {
+        sqrt_rescale = NTL::RR(scheme.context.precision);
+    }
+    m_U0PreFFT     = EvalSlotsToCoeffsPrecompute(A, rotGroup, false, sqrt_rescale, scheme.context.q_num - 1);
+    m_U0hatTPreFFT = EvalCoeffsToSlotsPrecompute(A, rotGroup, false, sqrt_rescale, scheme.context.q_num - 1 - 3);
 
 
     Precompute_rot_in_out_C2S();
@@ -1053,7 +1069,7 @@ EncodingMatrix::EvalCoeffsToSlotsPrecompute(const vector<complex<double>> &A, co
     double ImportScale = 1/1;
     // double ImportScale = 1;
 
-
+    // is_sqrt_rescale = 0;
     int BASE_NUM_LEVELS_TO_DROP = 1;
 
     int levelBudget = m_paramsEnc[0];
@@ -1088,7 +1104,6 @@ EncodingMatrix::EvalCoeffsToSlotsPrecompute(const vector<complex<double>> &A, co
         flagRem = 1;
     }
 
-    scale = scheme.context.precision;
     // result is the rotated plaintext version of the coefficients
     vector<vector<PlaintextT*>> result(levelBudget);
     for (int i = 0; i < levelBudget; i++)
@@ -1102,7 +1117,8 @@ EncodingMatrix::EvalCoeffsToSlotsPrecompute(const vector<complex<double>> &A, co
                 vector<complex<double>> a2(slots, 0);
 
                 // Plaintext plain(resultMid, N, slots, L + stop - levelBudget + 1 + K);
-                PlaintextT* plain = new PlaintextT(N, scheme.context.t_num, slots, NTL::RR(scheme.context.precision));
+
+                PlaintextT* plain = new PlaintextT(N, scheme.context.t_num, slots, scale);
                 // cout<<"level: "<<L + stop - levelBudget + 1 + K<<endl;
                 result[i].push_back(plain);
                 a1.push_back(a2);
@@ -1116,13 +1132,12 @@ EncodingMatrix::EvalCoeffsToSlotsPrecompute(const vector<complex<double>> &A, co
                 vector<complex<double>> a2(slots, 0);
 
                 // Plaintext plain(resultMid, N, slots, L + i - levelBudget + 1 + K);
-                PlaintextT* plain = new PlaintextT(N, scheme.context.t_num, slots, NTL::RR(scheme.context.precision));
+                PlaintextT* plain = new PlaintextT(N, scheme.context.t_num, slots, scale);
                 // cout<<"level: "<<L + i - levelBudget + 1 + K<<endl;
                 result[i].push_back(plain);
                 a1.push_back(a2);
             }
         }
-        // cts_yuan.push_back(a1);
     }
 
     if (slots == M / 4)
@@ -1224,8 +1239,8 @@ EncodingMatrix::EvalCoeffsToSlotsPrecompute(const vector<complex<double>> &A, co
                         {
                             for (int iVals = 0; iVals < slots; iVals++)
                             {
-                                rotateTemp_host[iVals].x = rotateTemp[iVals].real()/(b*g/4.);;
-                                rotateTemp_host[iVals].y = rotateTemp[iVals].imag()/(b*g/4.);;
+                                rotateTemp_host[iVals].x = rotateTemp[iVals].real()/(b*g/2. * scheme.context.eval_sine_K);
+                                rotateTemp_host[iVals].y = rotateTemp[iVals].imag()/(b*g/2. * scheme.context.eval_sine_K);
                             }
                         }
                         else
@@ -1294,7 +1309,7 @@ EncodingMatrix::EvalSlotsToCoeffsPrecompute(const vector<complex<double>> &A, co
             for (int j = 0; j < numRotationsRem; j++)
             {
                 // Plaintext plain(resultMid, N, slots, L - i + K);
-                PlaintextT* plain = new PlaintextT(N, scheme.context.t_num, slots, NTL::RR(scheme.context.precision));
+                PlaintextT* plain = new PlaintextT(N, scheme.context.t_num, slots, scale);
                 result[i].push_back(plain);
             }
         }
@@ -1303,7 +1318,7 @@ EncodingMatrix::EvalSlotsToCoeffsPrecompute(const vector<complex<double>> &A, co
             //            result[i] = vector<Plaintext>(numRotations);
             for (int j = 0; j < numRotations; j++)
             {
-                PlaintextT* plain = new PlaintextT(N, scheme.context.t_num, slots, NTL::RR(scheme.context.precision));
+                PlaintextT* plain = new PlaintextT(N, scheme.context.t_num, slots, scale);
                 result[i].push_back(plain);
             }
         }

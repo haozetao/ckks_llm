@@ -219,6 +219,7 @@ void Context_23::getPrimeCKKS(int hamming_weight)
 			0.00030762663662056906, -3.2906830602999636e-16, -3.99092135655925e-05, -9.066232632611505e-17
 		};
 		double_angle_cost_level = 2;
+		eval_sine_K = 12;
 	} else if(hamming_weight == 192){
 		// deg = 64 for the case of sk's hamming weight = 192
 		// after modup the coeffs are in [-25,25]
@@ -232,7 +233,8 @@ void Context_23::getPrimeCKKS(int hamming_weight)
 			0.002205183040244195, -2.3827202322089167e-16, -0.0002053253964503218, 6.214617156678451e-16, 
 			1.486644873035847e-05, -2.382720232208916e-16, -8.63267831706962e-07, -3.49464976119931e-17
 		};
-		double_angle_cost_level = 4;		
+		double_angle_cost_level = 4;
+		eval_sine_K = 25;
 	} else {
         throw invalid_argument("hamming weight error!");
 	}

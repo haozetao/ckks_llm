@@ -3,6 +3,7 @@
         "*.sage": "python",
         "stdexcept": "cpp",
         "ostream": "cpp",
-        "random": "cpp"
+        "random": "cpp",
+        "cmath": "cpp"
     }
 }

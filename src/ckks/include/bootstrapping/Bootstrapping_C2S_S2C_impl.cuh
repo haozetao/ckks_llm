@@ -376,12 +376,9 @@ void EncodingMatrix::EvalCoeffsToSlots(vector<vector<PlaintextT*>>&A, Ciphertext
         scheme.context.modUpTtoPQl_23(T_to_PQ_temp, bs_cipher_T, cipher.l, 2);
         // u1 <- P^-1 * u1
         scheme.context.modDownPQltoQl_23(cipher.cipher_device, T_to_PQ_temp, cipher.l, 2);
-    
-        scheme.rescaleAndEqual_noNTT(cipher);
 
-        // scheme.context.ToNTTInplace(cipher.cipher_device, 0, K, 2, cipher.l+1, L+1);
-        // scheme.decrypt_display(secretKey, cipher);
-        // scheme.context.FromNTTInplace(cipher.cipher_device, 0, K, 2, cipher.l+1, L+1);
+        if(is_sqrt_rescale && s == levelBudget - 1) continue;
+        scheme.rescaleAndEqual_noNTT(cipher);    
     }
 
 
@@ -527,6 +524,7 @@ void EncodingMatrix::EvalSlotsToCoeffs(vector<vector<PlaintextT*>>&A, Ciphertext
         flagRem = 1;
     }
 
+    // int isRescale_level = -1;
 
     scheme.context.FromNTTInplace(cipher.cipher_device, 0, K, 2, cipher.l+1, L+1);
 
@@ -622,9 +620,9 @@ void EncodingMatrix::EvalSlotsToCoeffs(vector<vector<PlaintextT*>>&A, Ciphertext
         // u1 <- P^-1 * u1
         scheme.context.modDownPQltoQl_23(cipher.cipher_device, T_to_PQ_temp, cipher.l, 2);
 
+        if(is_sqrt_rescale && s == 0) continue;
         scheme.rescaleAndEqual_noNTT(cipher);
     }
-
     if (flagRem)
     {
         int32_t stop = levelBudget - flagRem;

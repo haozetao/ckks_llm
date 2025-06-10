@@ -134,18 +134,18 @@ __forceinline__ __host__ __device__ uint32_t bitReverse(uint32_t operand, int bi
 std::random_device dev;
 std::mt19937_64 rng(dev());
 
-void randomComplexArray(cuDoubleComplex* ComplexArray, long slots, double bound = 1.0)
+void randomComplexArray(cuDoubleComplex* ComplexArray, long slots, double lower = -1.0, double upper = 1.0)
 {
-    std::uniform_int_distribution<int> randnum(0, RAND_MAX);
+    std::uniform_real_distribution<float> randnum(lower, upper);
 
 	for (long i = 0; i < slots; ++i) {
 		// ComplexArray[i].x = ((double) rand()/(RAND_MAX) - 0.5) * 2 * bound;
         // ComplexArray[i].y = ((double) rand()/(RAND_MAX) - 0.5) * 2 * bound;
-        // ComplexArray[i].x = (double) randnum(rng)/(RAND_MAX) * bound;
+        ComplexArray[i].x = randnum(rng);
         // ComplexArray[i].y = (double) randnum(rng)/(RAND_MAX) * bound;
 
 		// ComplexArray[i].x = (double) rand()/(RAND_MAX) * bound;
-		ComplexArray[i].x = ( i % 64) / 100.;
+		// ComplexArray[i].x = ( i % 64) / 100.;
 		ComplexArray[i].y = 0;
 
         // ComplexArray[i].y = (double) rand()/(RAND_MAX) * bound;

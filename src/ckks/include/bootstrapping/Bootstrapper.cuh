@@ -80,15 +80,20 @@ void Bootstrapper::prepare_sine_chebyshev_poly()
 
 /**************************************************chebyshev coeff tree***************************************************/
     eval_sine_chebyshev_coeff = context.eval_sine_chebyshev_coeff;
-    scheme_algo.chebyshev_poly_coeff_tree_pool[1]->coeffs = eval_sine_chebyshev_coeff;
-    scheme_algo.chebyshev_poly_coeff_tree_pool[1]->maxDegree = eval_sine_chebyshev_coeff.size() - 1;
+    int sine_tree_node_num = 1<<int(ceil(log2(eval_sine_chebyshev_coeff.size())));
+    for(int i = 0; i < sine_tree_node_num; i++)
+    {
+        eval_sine_chebyshev_poly_pool.push_back(new Chebyshev_Polynomial());
+    }
+    eval_sine_chebyshev_poly_pool[1]->coeffs = eval_sine_chebyshev_coeff;
+    eval_sine_chebyshev_poly_pool[1]->maxDegree = eval_sine_chebyshev_coeff.size() - 1;
 
     {
-        int degree = scheme_algo.chebyshev_poly_coeff_tree_pool[1]->degree();
+        int degree = eval_sine_chebyshev_poly_pool[1]->degree();
         int logDegree = ceil(log2(degree));
         int logSplit = (logDegree >> 1);
 
-        scheme_algo.prepareChebyshevCoeffsTree(logSplit, logDegree, 1);
+        scheme_algo.call_prepareChebyshevCoeffsTree(logSplit, logDegree, 1, eval_sine_chebyshev_poly_pool);
     }
 }
 
@@ -109,7 +114,7 @@ void Bootstrapper::Bootstrapping(Ciphertext& cipher)
 }
 void Bootstrapper::FirstSTCBootstrapping(Ciphertext& cipher)
 {
-    if(cipher.l != encodingMatrix.levelBudgetDec){
+    if(cipher.l != encodingMatrix.is_sqrt_rescale * encodingMatrix.rescale_times){
         cout<<"bootstrapping cipher not on level0!!!"<<endl;
     }
     if(boot_key_flag == 0){
@@ -120,6 +125,7 @@ void Bootstrapper::FirstSTCBootstrapping(Ciphertext& cipher)
 
     encodingMatrix.EvalSlotsToCoeffs(encodingMatrix.m_U0PreFFT, cipher);
 
+    // scheme.decrypt_display(scheme_algo.secretkey, cipher, "ctReal after stc ");
 	// Step 1: scale to q0/|m|
     // q0 / message_ratio = q0 / 4.0 == input.scale
 	// Step 2 : Extend the basis from q to Q
@@ -127,22 +133,14 @@ void Bootstrapper::FirstSTCBootstrapping(Ciphertext& cipher)
 
     encodingMatrix.EvalCoeffsToSlots(encodingMatrix.m_U0hatTPreFFT, cipher);
 
-    newResetScale(cipher);
+    // newResetScale(cipher);
 
     scheme.conjugate_23(*ctReal, cipher);
-    scheme.sub(*ctImag, cipher, *ctReal);
     
     // Real part * 2
-    scheme.addAndEqual(*ctReal, cipher);
-    // Imag part
-    scheme.divByiAndEqual(*ctImag);
-
+    scheme.addAndEqual(cipher, *ctReal);
     // // c1.l -= 4;
-    EvalModAndEqual(*ctReal);
-    EvalModAndEqual(*ctImag);
-
-    scheme.mulByiAndEqual(*ctImag);
-    scheme.add(cipher, *ctReal, *ctImag);
+    EvalModAndEqual(cipher);
 
     scheme.multConstAndEqual(cipher, 256./16*16);
 }
@@ -298,11 +296,8 @@ void Bootstrapper::EvalModAndEqual(Ciphertext& cipher)
 
     scheme.addConstAndEqual(cipher, -0.5/(sine_factor * (sine_B - sine_A)));
 
-    // CUDATimer cuTimer;
-    // cuTimer.start();
     // chebyshev
-    scheme_algo.evalPolynomialChebyshev(cipher, target_scale);
-    // cout<<"time: "<<cuTimer.stop()<<endl;
+    scheme_algo.evalPolynomialChebyshev(cipher, target_scale, eval_sine_chebyshev_poly_pool);
 
     double sqrt2Pi_temp = to_double(sqrt2Pi);
 	// Double angle
