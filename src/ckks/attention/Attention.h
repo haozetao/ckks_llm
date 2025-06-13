@@ -51,11 +51,11 @@ public:
     /********************************Multi-Input Non-Linear Functions*******************************/
     // eval 1/x
     vector<double> K_inv;
-    void evalInv(Ciphertext& cipher, SecretKey& sk, double upper_bound = 1.0);
+    void evalInv(Ciphertext& cipher, double upper_bound = 1.0);
 
     // eval 1/\sqrt(x)
-    vector<double> K_square_inv;
-    void evalSquareInv(Ciphertext& cipher, double upper_bound = 1.0);
+    vector<double> K_sqrt_inv;
+    void evalSqrtInv(Ciphertext& cipher, SecretKey& sk, double upper_bound = 1.0);
 
     // SoftMax function: exp(x_i) / sum(exp(x_j))
     void evalSoftMax(Ciphertext& cipher);

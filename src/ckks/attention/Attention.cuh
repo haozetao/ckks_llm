@@ -78,7 +78,7 @@ Attention::Attention(Context_23& context, Scheme_23& scheme, SchemeAlgo& scheme_
     cuDoubleComplex* column_mask_buffer_device;
     cudaMalloc(&column_mask_buffer_device, sizeof(cuDoubleComplex) * slots);
 
-    for(int i = 0; i < 2; i++){
+    for(int i = 0; i < d; i++){
         Plaintext* mask_i = new Plaintext(N, L, L, slots, NTL::RR(context.precision));
         column_mask.push_back(mask_i);
 
@@ -96,7 +96,10 @@ Attention::Attention(Context_23& context, Scheme_23& scheme, SchemeAlgo& scheme_
     
     
     /******************************************Inv and Square Inv*********************************************/
-    K_inv = {1.708209458521407, 1.3347202619383138, 1.0593437148393925, 1.0017626264306325, 1.0000034823730521};
+    // K_inv = {1.708209458521407, 1.3347202619383138, 1.0593437148393925, 1.0017626264306325, 1.0000034823730521};
+    K_inv = {1.708209458521407, 1.3347202619383138, 1.0593437148393925, 1.0017626264306325};
+
+    K_sqrt_inv = {1.472141915860566, 1.1254419159515154, 1.007928806890655};
 }
 
 void Attention::prepareMask(cuDoubleComplex* mask_host, vector<int> idx_vector)
@@ -179,14 +182,12 @@ void Attention::evalSiLU(Ciphertext& cipher)
 }
 
 // only in [0, 1]
-void Attention::evalInv(Ciphertext& cipher, SecretKey& sk, double upper_bound)
+void Attention::evalInv(Ciphertext& cipher, double upper_bound)
 {
-    // scale cipher into [-1,1]
     double scale = 1.0 / upper_bound;
     scheme.multConstAndEqual(cipher, scale);
     if(abs(scale - int(scale)) >= 1e-6) scheme.rescaleAndEqual(cipher);
     
-
     Ciphertext* bx = scheme_algo.chebyshev_tree_pool[0];
     Ciphertext* ax = &cipher;
     Ciphertext* temp = scheme_algo.chebyshev_tree_pool[1];
@@ -197,6 +198,9 @@ void Attention::evalInv(Ciphertext& cipher, SecretKey& sk, double upper_bound)
 
     NTL::RR target_scale = cipher.scale;
 
+    // up scale
+    scheme.multConstAndEqual(cipher, 2);
+    cipher.scale *= 2;
     
     // b = (2 - k0*a)
     ax->scale = ax->scale / K_inv[0];
@@ -209,14 +213,8 @@ void Attention::evalInv(Ciphertext& cipher, SecretKey& sk, double upper_bound)
     ax->scale = ax->scale / K_inv[0];
     // b = k0 * b * (2 - k0*a)
     bx->scale = bx->scale / K_inv[0];
-    // cout<<"a.scale: "<<ax->scale<<"  b.scale: "<<bx->scale<<endl;
-
-    NTL::RR threshold(pow(double(context.precision), 1.75));
-    cout<<"threshold: "<<threshold<<endl;
-
 
     for(int i = 1; i < K_inv.size(); i++){
-
         // temp = (2 - k0*a)
         ax->scale = ax->scale / K_inv[i];
         scheme.constSub(*temp, *ax, 2);
@@ -224,33 +222,77 @@ void Attention::evalInv(Ciphertext& cipher, SecretKey& sk, double upper_bound)
 
         // a = a * (2 - k0*a)
         scheme.multAndEqual_23(*ax, *temp);
-        if(ax->scale > threshold){
-            scheme.rescaleAndEqual(*ax);
-            // cout<<"111"<<endl;
-        }
+        scheme.rescaleAndEqual(*ax);
         // a = k0 * a * (2 - k0*a)
         ax->scale = ax->scale / K_inv[i];
 
         // b = k0 * b * (2 - k0*a)
         scheme.multAndEqual_23(*bx, *temp);
-        if(bx->scale > threshold){
-            scheme.rescaleAndEqual(*bx);
-            // cout<<"222"<<endl;
-        }
+        scheme.rescaleAndEqual(*bx);
         bx->scale = bx->scale / K_inv[i];
-
-        // cout<<"a.scale: "<<ax->scale<<"  b.scale: "<<bx->scale<<endl;
-
-        // scheme.decrypt_display(sk, *temp, "temp");
-        // scheme.decrypt_display(sk, *ax, "ax");
-        // scheme.decrypt_display(sk, *bx, "bx");
     }
-    // while(bx->scale > target_scale*target_scale){
-    //     scheme.rescaleAndEqual(*bx);
-    // }
-    // NTL::RR scale = bx->scale / target_scale;
+    double tt = to_double(target_scale / bx->scale / upper_bound);
+    bx->scale *= target_scale / bx->scale;
+    scheme.multConstAndEqual(*bx, tt);
+    scheme.rescaleAndEqual(*bx);
+    cipher = *bx;
+}
+
+// only in [0, 1]
+void Attention::evalSqrtInv(Ciphertext& cipher, SecretKey& sk, double upper_bound)
+{
+    double scale = 1.0 / upper_bound;
+    scheme.multConstAndEqual(cipher, scale);
+    if(abs(scale - int(scale)) >= 1e-6) scheme.rescaleAndEqual(cipher);
     
-    // scheme.multConstAndEqual(, scale);
+    Ciphertext* bx = scheme_algo.chebyshev_tree_pool[0];
+    Ciphertext* ax = &cipher;
+    Ciphertext* temp = scheme_algo.chebyshev_tree_pool[1];
+    temp->l = cipher.l;
+    temp->scale = cipher.scale;
+    bx->l = cipher.l;
+    bx->scale = cipher.scale;
+
+    NTL::RR target_scale = cipher.scale;
+    cout<<"ax.l: "<<ax->l<<endl;
+
+    // b = (3 - k0*a)
+    ax->scale = ax->scale / K_sqrt_inv[0];
+    scheme.constSub(*bx, *ax, 3);
+    ax->scale = ax->scale * K_sqrt_inv[0];
+    // a = a * (3 - ki*a)**2
+    scheme.multAndEqual_23(*ax, *bx);
+    scheme.rescaleAndEqual(*ax);
+    scheme.multAndEqual_23(*ax, *bx);
+    scheme.rescaleAndEqual(*ax);    
+    // a = k0 / 4 * a * (3 - k0*a)**2
+    ax->scale = ax->scale / (K_sqrt_inv[0] / 4);
+    // b = ki**0.5 / 2 * b * (3 - k0*a)
+    bx->scale = bx->scale / ((pow(K_sqrt_inv[0], 0.5) / 2));
+
+    for(int i = 1; i < K_sqrt_inv.size(); i++){
+        // temp = (3 - ki*a)
+        ax->scale = ax->scale / K_sqrt_inv[i];
+        scheme.constSub(*temp, *ax, 3);
+        ax->scale = ax->scale * K_sqrt_inv[i];
+
+        // a = a * (3 - ki*a)**2
+        scheme.multAndEqual_23(*ax, *temp);
+        scheme.rescaleAndEqual(*ax);
+        scheme.multAndEqual_23(*ax, *temp);
+        scheme.rescaleAndEqual(*ax);
+        // a = ki / 4 * a * (3 - ki*a)**2
+        ax->scale = ax->scale / (K_sqrt_inv[i] / 4);
+
+        // b = ki**0.5 / 2 * b * (3 - ki*a)
+        scheme.multAndEqual_23(*bx, *temp);
+        scheme.rescaleAndEqual(*bx);
+        bx->scale = bx->scale / ((pow(K_sqrt_inv[i], 0.5) / 2));
+    }
+    double tt = to_double(target_scale / bx->scale / pow(upper_bound, 0.5));
+    bx->scale *= target_scale / bx->scale;
+    scheme.multConstAndEqual(*bx, tt);
+    scheme.rescaleAndEqual(*bx);
     cipher = *bx;
 }
 

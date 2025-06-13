@@ -75,7 +75,7 @@ float temp = 0;
     cuDoubleComplex* mes1;
 	mes1 = new cuDoubleComplex[slots];
 
-    randomComplexArray(mes1, slots, 0, 1);
+    randomComplexArray(mes1, slots, 6, 10);
 
     cuDoubleComplex* complex_msg1, *complex_msg2, *complex_msg3;
     cudaMalloc(&complex_msg1, sizeof(cuDoubleComplex) * slots);
@@ -120,17 +120,18 @@ float temp = 0;
 
 
             c2 = c1;
-            cout<<"c1.level before nonlinear: "<<c1.l<<endl;
+            cout<<"c1.level before nonlinear: "<<c1.l <<"  scale: "<<c1.scale<<endl;
             cuTimer.start();
                 // attention_scheme.evalExp(c1);
-                attention_scheme.evalInv(c1, sk);
+                // attention_scheme.evalInv(c1, 10);
+                attention_scheme.evalSqrtInv(c1, sk, 10);
                 // attention_scheme.evalSoftMax(c1);
 
                 // attention_scheme.evalGeLU(c1);
                 // attention_scheme.evalSiLU(c1);
 
             temp = cuTimer.stop();
-            cout<<"c1.level after nonlinear: "<<c1.l<<endl;   
+            cout<<"c1.level after nonlinear: "<<c1.l <<"  scale: "<<c1.scale<<endl;
 
             nonlinear = min(nonlinear, temp);
 
@@ -156,16 +157,18 @@ float temp = 0;
         cudaEventElapsedTime(&temp, start, end);
         dcd = min(dcd, temp);
         // print_device_array(complex_msg_dec, 8, "message_dec1");
-        scheme.decrypt_display(sk, c1, "softmax");
+        scheme.decrypt_display(sk, c1, "approx 1/sqrt(x)");
 
         vector<cuDoubleComplex> values_computed(slots);
         cudaMemcpy(values_computed.data(), complex_msg_dec, sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);
 
         vector<cuDoubleComplex> values_want(slots);
         cudaMemcpy(values_want.data(), complex_msg1, sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);
+        cout<<"target: ";
         for(int i = 0; i < slots; i++){
             double x = values_want[i].x;
-            values_want[i].x = 1/x;
+            // values_want[i].x = 1/x;
+            values_want[i].x = 1/pow(x, 0.5);
             // values_want[i].x = exp(x);
             // values_want[i].x = x * normcdf(x);
             // values_want[i].x = x * (1 / (1+exp(-x)));
