@@ -42,7 +42,7 @@ public:
 	
 	void evalPolynomialChebyshev(Ciphertext &cipher, NTL::RR target_scale, vector<Chebyshev_Polynomial*>& cheby_poly_pool_vector);
 
-	void computePowerBasis(int idx, NTL::RR target_scale);
+	// void computePowerBasis(int idx, NTL::RR target_scale);
 
 	void evalRecurse(NTL::RR target_scale, int logSplit, int logDegree, int tree_idx, vector<Chebyshev_Polynomial*>& cheby_poly_pool_vector);
 	// void evalIteration(NTL::RR target_scale, int logDegree, vector<Chebyshev_Polynomial*>& cheby_poly_pool_vector);

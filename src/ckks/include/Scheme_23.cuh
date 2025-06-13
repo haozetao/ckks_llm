@@ -290,6 +290,32 @@ void Scheme_23::subAndEqual(Ciphertext& cipher1, Ciphertext& cipher2)
     poly_sub_batch_device(cipher1.bx_device, cipher2.bx_device, N, 0, 0, K, l+1);
 }
 
+void Scheme_23::constSub(Ciphertext& cipher_res, Ciphertext& cipher, double cnst)
+{
+    cipher_res.scale = cipher.scale;
+    cipher_res.l = cipher.l;
+    NTL::ZZ scaled_real = to_ZZ(round(cipher.scale * cnst));
+    if(scaled_real == 0) return;
+    for(int i = 0; i < cipher.l+1; i++)
+    {
+        add_const_copy_vec[i] = scaled_real % context.qVec[i];
+    }
+    cudaMemcpy(add_const_buffer, add_const_copy_vec.data(), sizeof(uint64_tt) * add_const_copy_vec.size(), cudaMemcpyHostToDevice);
+    poly_real_const_sub_3param_batch_device(cipher_res.cipher_device, cipher.cipher_device, add_const_buffer, context.N, context.L+1, context.K, cipher.l+1);
+}
+
+void Scheme_23::constSubAndEqual(Ciphertext& cipher, double cnst)
+{
+    NTL::ZZ scaled_real = to_ZZ(round(cipher.scale * cnst));
+    if(scaled_real == 0) return;
+    for(int i = 0; i < cipher.l+1; i++)
+    {
+        add_const_copy_vec[i] = scaled_real % context.qVec[i];
+    }
+    cudaMemcpy(add_const_buffer, add_const_copy_vec.data(), sizeof(uint64_tt) * add_const_copy_vec.size(), cudaMemcpyHostToDevice);
+    poly_real_const_sub_batch_device(cipher.cipher_device, add_const_buffer, context.N, context.L+1, context.K, cipher.l+1);
+}
+
 #define rescale_block 256
 
 __global__ void rescaleAndEqual_kernel(uint64_tt* device_a, uint32_tt n, int p_num, int q_num, int l, uint64_tt* qiInvVecModql_device, uint64_tt* qiInvVecModql_shoup_device)
@@ -469,12 +495,14 @@ void Scheme_23::decrypt_display(SecretKey& sk, Ciphertext& cipher, char* s, int 
     cuDoubleComplex* array_PQ = new cuDoubleComplex[slots];
     cudaDeviceSynchronize();
     cudaMemcpy(array_PQ, context.encode_buffer, sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);
-    printf("data = [");
-    for(int i = 0; i < slots/2; i++)
+    printf("%s = [", s);
+    double max_value = 0;
+    for(int i = 0; i < 8; i++)
     {
-        if(i % row_num == 0) printf("%d :  ", i / row_num);
-        printf("%lf, ", array_PQ[i].x);
-        if(i % row_num == row_num - 1) printf("\n");
+        printf("%.8lf, ", array_PQ[i].x);
+        // if(i % row_num == row_num - 1) printf("\n");
+        max_value = max(max_value, array_PQ[i].x);
     }
+    cout<<"] max: "<<max_value<<endl;
     delete array_PQ;
 }

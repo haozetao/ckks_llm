@@ -12,7 +12,7 @@ using namespace std;
 #include "src/ckks/include/Scheme_23.cuh"
 #include "src/ckks/include/TimeUtils.cuh"
 #include "src/ckks/include/precision.cuh"
-#include "src/ckks/nonlinear/NonLinear.cuh"
+#include "src/ckks/attention/Attention.cuh"
 
 int main(int argc, char* argv[])
 {
@@ -26,7 +26,7 @@ int main(int argc, char* argv[])
     cudaEventCreate(&end);
     CUDATimer cuTimer;
 
-    Context_23 context(logN, logslots, 192);
+    Context_23 context(logN, logslots, 64);
     cout<<"Generate Context OK"<<endl;
 
     int N = context.N;
@@ -68,13 +68,14 @@ float temp = 0;
     int is_STC_first = 1;
     SchemeAlgo scheme_algo(context, scheme, sk);
         scheme_algo.malloc_bsgs_buffer(context.eval_sine_chebyshev_coeff.size());
-    NonLinear nonLinear_scheme(context, scheme, scheme_algo);
+    Attention attention_scheme(context, scheme, scheme_algo, 128, 12, 64);
+        attention_scheme.addKey(sk);
 
 
     cuDoubleComplex* mes1;
 	mes1 = new cuDoubleComplex[slots];
 
-    randomComplexArray(mes1, slots, -5, 5);
+    randomComplexArray(mes1, slots, 0, 1);
 
     cuDoubleComplex* complex_msg1, *complex_msg2, *complex_msg3;
     cudaMalloc(&complex_msg1, sizeof(cuDoubleComplex) * slots);
@@ -90,6 +91,7 @@ float temp = 0;
     // for(target_level; target_level >= 0; target_level--)
     {
         Plaintext plain_m1(N, L, target_level, slots, NTL::RR(context.precision));
+        // Plaintext plain_m2(N, L, target_level, slots, NTL::RR(context.precision));
 
         Ciphertext c1(N, L, L, slots, NTL::RR(context.precision));
         Ciphertext c2(N, L, L, slots, NTL::RR(context.precision));
@@ -98,7 +100,7 @@ float temp = 0;
         cuDoubleComplex* complex_msg_dec;
         cudaMalloc(&complex_msg_dec, sizeof(cuDoubleComplex) * slots);
 
-        for(int i = 0; i < 10; i++)
+        for(int i = 0; i < 1; i++)
         {
             cudaEventRecord(start);
                 context.encode(complex_msg1, plain_m1);
@@ -106,6 +108,7 @@ float temp = 0;
             cudaEventSynchronize(end);
             cudaEventElapsedTime(&temp, start, end);
             ecd = min(ecd, temp);
+                // context.encode(complex_msg1, plain_m2);
 
             cudaEventRecord(start);
                 scheme.encryptMsg(c1, plain_m1);
@@ -119,11 +122,13 @@ float temp = 0;
             c2 = c1;
             cout<<"c1.level before nonlinear: "<<c1.l<<endl;
             cuTimer.start();
-                // nonLinear_scheme.evalExp(c1);
-                // nonLinear_scheme.evalCDF(c1);
-                nonLinear_scheme.evalSigmoid(c1);
-                scheme.multAndEqual_23(c1, c2);
-                scheme.rescaleAndEqual(c1);
+                // attention_scheme.evalExp(c1);
+                attention_scheme.evalInv(c1, sk);
+                // attention_scheme.evalSoftMax(c1);
+
+                // attention_scheme.evalGeLU(c1);
+                // attention_scheme.evalSiLU(c1);
+
             temp = cuTimer.stop();
             cout<<"c1.level after nonlinear: "<<c1.l<<endl;   
 
@@ -150,7 +155,8 @@ float temp = 0;
         cudaEventSynchronize(end);
         cudaEventElapsedTime(&temp, start, end);
         dcd = min(dcd, temp);
-        print_device_array(complex_msg_dec, 8, "message_dec1");
+        // print_device_array(complex_msg_dec, 8, "message_dec1");
+        scheme.decrypt_display(sk, c1, "softmax");
 
         vector<cuDoubleComplex> values_computed(slots);
         cudaMemcpy(values_computed.data(), complex_msg_dec, sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);
@@ -159,9 +165,10 @@ float temp = 0;
         cudaMemcpy(values_want.data(), complex_msg1, sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);
         for(int i = 0; i < slots; i++){
             double x = values_want[i].x;
+            values_want[i].x = 1/x;
             // values_want[i].x = exp(x);
             // values_want[i].x = x * normcdf(x);
-            values_want[i].x = x * (1 / (1+exp(-x)));
+            // values_want[i].x = x * (1 / (1+exp(-x)));
             if(i < 8) printf("%.8lf, ", values_want[i].x);
         }
         cout<<endl;

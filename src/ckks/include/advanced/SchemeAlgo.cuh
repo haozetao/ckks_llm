@@ -88,7 +88,7 @@ void SchemeAlgo::prepareChebyshevCoeffsTree(int logSplit, int logDegree, int tre
             logDegree = ceil(log2(poly->degree()));
             logSplit = logDegree >> 1;
             
-            cout<<"prepareChebyshevCoeffsTree1: "<<tree_idx<<endl;
+            // cout<<"prepareChebyshevCoeffsTree1: "<<tree_idx<<endl;
             prepareChebyshevCoeffsTree(logSplit, logDegree, tree_idx, cheby_poly_pool_vector);
             return;
         }

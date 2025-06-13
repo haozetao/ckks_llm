@@ -221,6 +221,40 @@ __global__
 __launch_bounds__(
     POLY_MAX_THREADS, 
     POLY_MIN_BLOCKS)
+void poly_real_const_sub_batch_kernel(uint64_tt* device_a, uint64_tt* add_const_real_buffer, uint32_tt n, int q_num, int idx_mod)
+{
+    register uint32_tt index = blockIdx.y;
+    register int idx_in_poly = blockIdx.x * poly_block + threadIdx.x;
+
+    register uint64_tt q = pqt_cons[idx_mod + index];
+    register uint64_tt rb = add_const_real_buffer[index] + q - device_a[(index + q_num) * n + idx_in_poly];
+    csub_q(rb, q);
+    device_a[(index + q_num) * n + idx_in_poly] = rb;
+
+    device_a[(index) * n + idx_in_poly] = q - device_a[(index) * n + idx_in_poly];
+}
+
+__global__
+__launch_bounds__(
+    POLY_MAX_THREADS, 
+    POLY_MIN_BLOCKS)
+void poly_real_const_sub_3param_batch_kernel(uint64_tt* device_a, uint64_tt* device_b, uint64_tt* add_const_real_buffer, uint32_tt n, int q_num, int idx_mod)
+{
+    register uint32_tt index = blockIdx.y;
+    register int idx_in_poly = blockIdx.x * poly_block + threadIdx.x;
+
+    register uint64_tt q = pqt_cons[idx_mod + index];
+    register uint64_tt rb = add_const_real_buffer[index] + q - device_b[(index + q_num) * n + idx_in_poly];
+    csub_q(rb, q);
+    device_a[(index + q_num) * n + idx_in_poly] = rb;
+
+    device_a[(index) * n + idx_in_poly] = q - device_b[(index) * n + idx_in_poly];
+}
+
+__global__
+__launch_bounds__(
+    POLY_MAX_THREADS, 
+    POLY_MIN_BLOCKS)
 void cipher_negate_batch_device_kernel(uint64_tt* device_a, uint32_tt n, int q_num, int idx_mod)
 {
     register uint32_tt index = blockIdx.y;
@@ -403,6 +437,18 @@ __host__ void poly_add_real_const_batch_device(uint64_tt* device_a, uint64_tt* a
 {
     dim3 add_dim(n / poly_block , mod_num);
     poly_add_const_batch_device_kernel<<< add_dim, poly_block >>>(device_a, add_const_real_buffer, n, idx_a, idx_mod);
+}
+
+__host__ void poly_real_const_sub_batch_device(uint64_tt* device_a, uint64_tt* add_const_real_buffer, uint32_tt n, int q_num, int idx_mod, int mod_num)
+{
+    dim3 add_dim(n / poly_block , mod_num, 2);
+    poly_real_const_sub_batch_kernel<<< add_dim, poly_block >>> (device_a, add_const_real_buffer, n, q_num, idx_mod);
+}
+
+__host__ void poly_real_const_sub_3param_batch_device(uint64_tt* device_a, uint64_tt* device_b, uint64_tt* add_const_real_buffer, uint32_tt n, int q_num, int idx_mod, int mod_num)
+{
+    dim3 add_dim(n / poly_block , mod_num, 2);
+    poly_real_const_sub_3param_batch_kernel<<< add_dim, poly_block >>> (device_a, device_b, add_const_real_buffer, n, q_num, idx_mod);
 }
 
 __host__ void cipher_negate_batch_device(uint64_tt* device_a, uint32_tt n, int q_num, int idx_mod, int mod_num)

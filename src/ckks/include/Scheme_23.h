@@ -127,6 +127,8 @@ public:
 	// Homomorphic Substraction
 	void sub(Ciphertext& cipher_res, Ciphertext& cipher1, Ciphertext& cipher2);
 	void subAndEqual(Ciphertext& cipher1, Ciphertext& cipher2);
+	void constSub(Ciphertext& cipher_res, Ciphertext& cipher, double cnst);
+	void constSubAndEqual(Ciphertext& cipher, double cnst);
 
 	// Homomorphic Negation
 	void negate(Ciphertext& cipher_res, Ciphertext& cipher);
@@ -147,7 +149,7 @@ public:
 
 	void multConstAndEqual(Ciphertext& cipher, Plaintext& cnst);
 	void multConstAndEqual(Ciphertext& cipher, double cnst);
-	void multConstAndEqual(Ciphertext& cipher, cuDoubleComplex cnst);
+	// void multConstAndEqual(Ciphertext& cipher, cuDoubleComplex cnst);
 
 	void multConstAndAddCipherEqual(Ciphertext& c1, Ciphertext& c2, double cnst, NTL::RR target_scale);
 

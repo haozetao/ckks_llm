@@ -4,6 +4,7 @@
         "stdexcept": "cpp",
         "ostream": "cpp",
         "random": "cpp",
-        "cmath": "cpp"
+        "cmath": "cpp",
+        "iostream": "cpp"
     }
 }
