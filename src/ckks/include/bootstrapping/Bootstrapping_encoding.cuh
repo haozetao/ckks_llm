@@ -1155,7 +1155,7 @@ EncodingMatrix::EvalCoeffsToSlotsPrecompute(const vector<complex<double>> &A, co
             for (int scaleI = 0; scaleI < scheme.context.q_num - target_level + levelBudget - s - 1; scaleI++)
             {
                 scaleReal = scaleReal * scaleReal / scheme.context.qVec[scheme.context.q_num - scaleI - 1];
-                cout<<"encode scaler index: "<<scheme.context.q_num - scaleI - 1<<endl;
+                // cout<<"encode scaler index: "<<scheme.context.q_num - scaleI - 1<<endl;
             }
 
             // cout<<"encode num: " <<endl;

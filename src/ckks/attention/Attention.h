@@ -28,7 +28,8 @@ public:
     int token_len;
     double softmax_x_max;
 
-    vector<Plaintext*> column_mask;
+    vector<Plaintext*> column_mask_reduce;
+    vector<Plaintext*> column_mask_ccmm;
     void prepareMask(cuDoubleComplex* mask_host, vector<int> idx_vector);
 
     void addKey(SecretKey& sk);
@@ -62,4 +63,12 @@ public:
 
     // Layer Normalization: normalize each row of the matrix
     void LayerNorm(Ciphertext& cipher);
+
+    // Q and K are the ciphertext in colomn packing
+    // compute Q * K ^ T
+    // example: Q 128*64 * K 128*64 -> O 128*128
+    Ciphertext** tmpcipher_buffer;
+    Ciphertext* leafnode;
+    void CCMM_QK(Ciphertext& Q, Ciphertext& K, Ciphertext& O1, Ciphertext& O2);
+    void Recursive_CCMM_reduce(Ciphertext& Q, Ciphertext& K, int layer, int max_layer, int seq, int column_num, Ciphertext** tmpcipher_buffer);
 };

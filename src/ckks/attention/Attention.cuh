@@ -2,6 +2,7 @@
 
 #include "Attention.h"
 #include "../include/advanced/SchemeAlgo.cuh"
+#include "../include/TimeUtils.cuh"
 
 Attention::Attention(Context_23& context, Scheme_23& scheme, SchemeAlgo& scheme_algo, int token_len, int head_num, int d)
     : context(context), scheme(scheme), scheme_algo(scheme_algo), token_len(token_len), head_num(head_num), d(d)
@@ -78,9 +79,10 @@ Attention::Attention(Context_23& context, Scheme_23& scheme, SchemeAlgo& scheme_
     cuDoubleComplex* column_mask_buffer_device;
     cudaMalloc(&column_mask_buffer_device, sizeof(cuDoubleComplex) * slots);
 
+    cout<<"prepare reduce sum mask"<<endl;
     for(int i = 0; i < d; i++){
         Plaintext* mask_i = new Plaintext(N, L, L, slots, NTL::RR(context.precision));
-        column_mask.push_back(mask_i);
+        column_mask_reduce.push_back(mask_i);
 
         vector<int> mask_idx;
         for(int t = 0; t < column_num / d; t++){
@@ -91,21 +93,56 @@ Attention::Attention(Context_23& context, Scheme_23& scheme, SchemeAlgo& scheme_
         cudaMemcpy(column_mask_buffer_device, column_mask_buffer_host, sizeof(cuDoubleComplex) * slots, cudaMemcpyHostToDevice);
         context.encode(column_mask_buffer_device, *mask_i);
     }
-    delete column_mask_buffer_host;
-    cudaFree(column_mask_buffer_device);
-    
+
     
     /******************************************Inv and Square Inv*********************************************/
     // K_inv = {1.708209458521407, 1.3347202619383138, 1.0593437148393925, 1.0017626264306325, 1.0000034823730521};
     K_inv = {1.708209458521407, 1.3347202619383138, 1.0593437148393925, 1.0017626264306325};
 
     K_sqrt_inv = {1.472141915860566, 1.1254419159515154, 1.007928806890655};
+
+
+    /******************************Q * K^T***********************************/
+    // prepare mask for CCMM Q*K^T
+    cout<<"prepare Q*K^T mask"<<endl;
+    for(int i = 1; i < d; i<<=1){
+        Plaintext* mask_i = new Plaintext(N, L, L, slots, NTL::RR(context.precision));
+        column_mask_ccmm.push_back(mask_i);
+
+        vector<int> mask_idx;
+        for(int j = 0; 2*j*i < d; j++){
+            for(int k = 0; k < i; k++){
+                for(int t = 0; t < column_num / d; t++){
+                    mask_idx.push_back(t * d + j * i * 2 + k);
+                }
+            }
+        }
+        prepareMask(column_mask_buffer_host, mask_idx);
+        cudaMemcpy(column_mask_buffer_device, column_mask_buffer_host, sizeof(cuDoubleComplex) * slots, cudaMemcpyHostToDevice);
+        context.encode(column_mask_buffer_device, *mask_i);
+        
+        Plaintext* mask_i_other = new Plaintext(N, L, L, slots, NTL::RR(context.precision));
+        column_mask_ccmm.push_back(mask_i_other);
+        for (int idx = 0; idx < mask_idx.size(); idx++){
+            mask_idx[idx] += i;
+        }
+        prepareMask(column_mask_buffer_host, mask_idx);
+        cudaMemcpy(column_mask_buffer_device, column_mask_buffer_host, sizeof(cuDoubleComplex) * slots, cudaMemcpyHostToDevice);
+        context.encode(column_mask_buffer_device, *mask_i_other);
+    }
+    delete column_mask_buffer_host;
+    cudaFree(column_mask_buffer_device);
+    
+    /******************************Q * K^T***********************************/
+    // tmpcipher_buffer = (Ciphertext **)malloc(sizeof(Ciphertext) * (log2(d)+1));
+    tmpcipher_buffer = new Ciphertext*[int(log2(d) + 1)];
+    leafnode = scheme_algo.chebyshev_tree_pool[log2(d)+1];
 }
 
 void Attention::prepareMask(cuDoubleComplex* mask_host, vector<int> idx_vector)
 {
     int slots = context.slots;
-    // memset(mask_host, 0, sizeof(cuDoubleComplex));
+    memset(mask_host, 0, sizeof(cuDoubleComplex) * slots);
     // for(int i = 0; i < slots; i++) mask_host[i].x = mask_host[i].y = 0;
 
     for(auto idx : idx_vector){
@@ -118,12 +155,18 @@ void Attention::prepareMask(cuDoubleComplex* mask_host, vector<int> idx_vector)
 
 void Attention::addKey(SecretKey& sk)
 {
-    for(int i = 0; i < log(d) + 1; i++){
+    cout<<"add CCMM & reduce sum Keys"<<endl;
+    printf("log(d): %d\n", log2(d));
+    for(int i = 0; i < log2(d) + 1; i++){
         scheme.addLeftRotKey_23(sk, 1 << i);
-        printf("%d ", 1<<i);
+        printf("%d, ", 1<<i);
         scheme.addLeftRotKey_23(sk, 32768 - (1 << i));
-        printf("%d ", 32768 - (1 << i));
+        printf("%d, ", 32768 - (1 << i));
     }
+    scheme.addLeftRotKey_23(sk, 16384);
+        printf("%d, ", 16384);
+    scheme.addLeftRotKey_23(sk, 256);
+        printf("%d, ", 256);
     cout<<endl;
 }
 
@@ -309,7 +352,7 @@ void Attention::evalSoftMax(Ciphertext& cipher)
         scheme.leftRotateAddSelf_23(cipher, 1 << i);
         // printf("reduce sum id: %d\n", 1<<i);
     }
-    scheme.multConstAndEqual(cipher, *column_mask[0]);
+    scheme.multConstAndEqual(cipher, *column_mask_reduce[0]);
     scheme.rescaleAndEqual(cipher);
 
     // repeate
@@ -322,4 +365,61 @@ void Attention::evalSoftMax(Ciphertext& cipher)
 void Attention::LayerNorm(Ciphertext& cipher)
 {
 
+}
+
+void Attention::CCMM_QK(Ciphertext& Q, Ciphertext& K, Ciphertext& O1, Ciphertext& O2)
+{
+    for (int i = 0; i < log2(d)+1; i++){
+        tmpcipher_buffer[i] = scheme_algo.chebyshev_tree_pool[i];
+    }
+
+    int slots = context.slots;
+    int column_num = slots / token_len;
+
+    if(d * token_len > slots){
+        printf("Error QKV matrix must in one cipher\n");
+    }
+    *leafnode = K;
+    Recursive_CCMM_reduce(Q, K, 0, log2(d), 0, column_num, tmpcipher_buffer);
+    
+    O1 = **tmpcipher_buffer;
+    
+    O2 = K;
+    scheme.leftRotateAndEqual_23(O2, (int)(slots/2));
+    *leafnode = O2;
+    
+    Recursive_CCMM_reduce(Q, O2, 0, log2(d), 0, column_num, tmpcipher_buffer);
+    O2 = **tmpcipher_buffer;
+}
+
+void Attention::Recursive_CCMM_reduce(Ciphertext& Q, Ciphertext& K, int layer, int max_layer, int seq, int column_num, Ciphertext** tmpcipher_buffer)
+{
+    if(layer == max_layer){
+        **tmpcipher_buffer = *leafnode;
+        if(seq){
+            scheme.leftRotateAndEqual_23(**tmpcipher_buffer, column_num);
+            *leafnode = **tmpcipher_buffer;
+        }
+        scheme.multAndEqual_23(**tmpcipher_buffer, Q);
+        scheme.rescaleAndEqual(**tmpcipher_buffer);
+        if (seq & 1)scheme.leftRotateAddSelf_23(**tmpcipher_buffer, 32768-1);
+        else scheme.leftRotateAddSelf_23(**tmpcipher_buffer, 1);
+        // scheme.decrypt_display(sk, **tmpcipher_buffer, "before mask");
+        scheme.multConstAndEqual(**tmpcipher_buffer, *column_mask_ccmm[(seq & 1)]);
+        scheme.rescaleAndEqual(**tmpcipher_buffer);
+        // scheme.decrypt_display(sk, *target_cipher, "after mask");
+        return;
+    }
+    Recursive_CCMM_reduce(Q, K, layer + 1, max_layer, seq * 2, column_num, tmpcipher_buffer);
+    Recursive_CCMM_reduce(Q, K, layer + 1, max_layer, seq * 2 + 1, column_num, tmpcipher_buffer+1);
+    scheme.addAndEqual(**tmpcipher_buffer, **(tmpcipher_buffer+1));
+    // if (layer == max_layer - 1)scheme.decrypt_display(sk, *target_cipher, "target_cipher");
+    if (layer > 0){
+        if (seq & 1) scheme.leftRotateAddSelf_23(**tmpcipher_buffer, 32768 - (1 << (max_layer - layer)));
+        else scheme.leftRotateAddSelf_23(**tmpcipher_buffer, (1 << (max_layer - layer)));
+        scheme.multConstAndEqual(**tmpcipher_buffer, *column_mask_ccmm[(seq & 1) + 2*(max_layer - layer)]);
+        scheme.rescaleAndEqual(**tmpcipher_buffer);
+        // if (layer == max_layer - 1)scheme.decrypt_display(sk, **tmpcipher_buffer, "tmpcipher_buffer");
+    }
+    return;
 }
