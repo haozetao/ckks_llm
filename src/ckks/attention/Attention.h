@@ -69,6 +69,15 @@ public:
     // example: Q 128*64 * K 128*64 -> O 128*128
     Ciphertext** tmpcipher_buffer;
     Ciphertext* leafnode;
+    Ciphertext* tmp_shift_K;
+    cuDoubleComplex* rot_diag;
+    cuDoubleComplex* device_diag;
+    vector<Plaintext> plain_tau_diag = vector<Plaintext>(64);
+    vector<Plaintext> mask_ccmm_left = vector<Plaintext>(64);
+    vector<Plaintext> mask_ccmm_right = vector<Plaintext>(64);
     void CCMM_QK(Ciphertext& Q, Ciphertext& K, Ciphertext& O1, Ciphertext& O2);
     void Recursive_CCMM_reduce(Ciphertext& Q, Ciphertext& K, int layer, int max_layer, int seq, int column_num, Ciphertext** tmpcipher_buffer);
+    void CCMM_QK_splited_heads(vector<Ciphertext *>& Q, vector<Ciphertext *>& K,vector<Ciphertext *>& O, int column_each_head);
+    void TauAndEqual(Ciphertext& A);
+    void CCMM_V(Ciphertext& sigma_O1, Ciphertext& sigma_O2, Ciphertext& tau_V, Ciphertext& O);
 };

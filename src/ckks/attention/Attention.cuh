@@ -137,6 +137,58 @@ Attention::Attention(Context_23& context, Scheme_23& scheme, SchemeAlgo& scheme_
     // tmpcipher_buffer = (Ciphertext **)malloc(sizeof(Ciphertext) * (log2(d)+1));
     tmpcipher_buffer = new Ciphertext*[int(log2(d) + 1)];
     leafnode = scheme_algo.chebyshev_tree_pool[log2(d)+1];
+    tmp_shift_K = scheme_algo.chebyshev_tree_pool[log2(d)+2];
+    cout << "d=" << d << endl;
+
+    /****************************** begin *V ***********************************/
+    rot_diag = new cuDoubleComplex[slots];
+    cudaMalloc(&device_diag, sizeof(cuDoubleComplex) * slots);
+
+    for (int j = 0; j < 8; j++){
+        for(int i = 0; i < 8; i++){
+            memset(rot_diag, 0, sizeof(cuDoubleComplex)*slots);
+            for (int k = 0; k < 512; k++){
+                rot_diag[j*8+i+k*64].x = 1;
+                // printf("%d, ",j*8+i+k*64);
+            }
+            // printf("\n");
+            cudaMemcpy(device_diag, rot_diag, sizeof(cuDoubleComplex) * slots, cudaMemcpyHostToDevice);
+            plain_tau_diag[j*8+i] = Plaintext(N, L, L, slots, NTL::RR(context.precision));
+            context.encode(device_diag, plain_tau_diag[j*8+i]);
+        }
+    }
+    // mask
+    for(int zero_column_num = 1; zero_column_num < d; zero_column_num++){
+        mask_ccmm_left[zero_column_num] = Plaintext(N, L, L, slots, NTL::RR(context.precision));
+        memset(rot_diag, 0, sizeof(cuDoubleComplex)*slots);
+        vector<int> mask_idx;
+        // one ciphertext for four head
+        for (int k = 0; k < 4; k++){
+            for (int j = 0; j < d-zero_column_num; j++){
+                mask_idx.push_back(j+k*d);
+            }
+        }
+        
+        prepareMask(column_mask_buffer_host, mask_idx);
+        cudaMemcpy(column_mask_buffer_device, column_mask_buffer_host, sizeof(cuDoubleComplex) * slots, cudaMemcpyHostToDevice);
+        context.encode(column_mask_buffer_device, mask_ccmm_left[zero_column_num]);
+    }
+
+    for(int mask_column_num = 1; mask_column_num < d; mask_column_num++){
+        mask_ccmm_right[mask_column_num] = Plaintext(N, L, L, slots, NTL::RR(context.precision));
+        memset(rot_diag, 0, sizeof(cuDoubleComplex)*slots);
+        vector<int> mask_idx;
+        for (int k = 0; k < 4; k++){
+            for (int j = 0; j < mask_column_num; j++){
+                mask_idx.push_back(d-j-1 + k*d);
+            }
+        }
+        prepareMask(column_mask_buffer_host, mask_idx);
+        cudaMemcpy(column_mask_buffer_device, column_mask_buffer_host, sizeof(cuDoubleComplex) * slots, cudaMemcpyHostToDevice);
+        context.encode(column_mask_buffer_device, mask_ccmm_right[mask_column_num]);
+    }
+
+    /****************************** end *V ***********************************/
 }
 
 void Attention::prepareMask(cuDoubleComplex* mask_host, vector<int> idx_vector)
@@ -156,7 +208,7 @@ void Attention::prepareMask(cuDoubleComplex* mask_host, vector<int> idx_vector)
 void Attention::addKey(SecretKey& sk)
 {
     cout<<"add CCMM & reduce sum Keys"<<endl;
-    printf("log(d): %d\n", log2(d));
+    printf("log2(d): %lf\n", log2(d));
     for(int i = 0; i < log2(d) + 1; i++){
         scheme.addLeftRotKey_23(sk, 1 << i);
         printf("%d, ", 1<<i);
@@ -167,6 +219,21 @@ void Attention::addKey(SecretKey& sk)
         printf("%d, ", 16384);
     scheme.addLeftRotKey_23(sk, 256);
         printf("%d, ", 256);
+    scheme.addLeftRotKey_23(sk, 16 * 256);
+        printf("%d, ", 16 * 256);
+    // for tau gs
+    for(int i = 0; i < 16; i++){
+        scheme.addLeftRotKey_23(sk, 256*4*i);
+        printf("%d, ", 256*8*i);
+    }
+    // for tau bs
+    for(int i = 0; i < 4; i++){
+        scheme.addLeftRotKey_23(sk, 256*i);
+        printf("%d, ", 256*i);
+    }
+    // for *V
+    scheme.addLeftRotKey_23(sk, 32768-64+1);
+        printf("%d, ", 32768-64+1);
     cout<<endl;
 }
 
@@ -392,34 +459,206 @@ void Attention::CCMM_QK(Ciphertext& Q, Ciphertext& K, Ciphertext& O1, Ciphertext
     O2 = **tmpcipher_buffer;
 }
 
-void Attention::Recursive_CCMM_reduce(Ciphertext& Q, Ciphertext& K, int layer, int max_layer, int seq, int column_num, Ciphertext** tmpcipher_buffer)
+void Attention::Recursive_CCMM_reduce(Ciphertext& Q, Ciphertext& K, int layer, int max_layer, int seq, int column_num, Ciphertext** cipher_stack)
 {
     if(layer == max_layer){
-        **tmpcipher_buffer = *leafnode;
+        **cipher_stack = *leafnode;
         if(seq){
-            scheme.leftRotateAndEqual_23(**tmpcipher_buffer, column_num);
-            *leafnode = **tmpcipher_buffer;
+            scheme.leftRotateAndEqual_23(**cipher_stack, column_num);
+            *leafnode = **cipher_stack;
         }
-        scheme.multAndEqual_23(**tmpcipher_buffer, Q);
-        scheme.rescaleAndEqual(**tmpcipher_buffer);
-        if (seq & 1)scheme.leftRotateAddSelf_23(**tmpcipher_buffer, 32768-1);
-        else scheme.leftRotateAddSelf_23(**tmpcipher_buffer, 1);
-        // scheme.decrypt_display(sk, **tmpcipher_buffer, "before mask");
-        scheme.multConstAndEqual(**tmpcipher_buffer, *column_mask_ccmm[(seq & 1)]);
-        scheme.rescaleAndEqual(**tmpcipher_buffer);
+        scheme.multAndEqual_23(**cipher_stack, Q);
+        scheme.rescaleAndEqual(**cipher_stack);
+        if (seq & 1)scheme.leftRotateAddSelf_23(**cipher_stack, 32768-1);
+        else scheme.leftRotateAddSelf_23(**cipher_stack, 1);
+        // scheme.decrypt_display(sk, **cipher_stack, "before mask");
+        scheme.multConstAndEqual(**cipher_stack, *column_mask_ccmm[(seq & 1)]);
+        scheme.rescaleAndEqual(**cipher_stack);
         // scheme.decrypt_display(sk, *target_cipher, "after mask");
         return;
     }
-    Recursive_CCMM_reduce(Q, K, layer + 1, max_layer, seq * 2, column_num, tmpcipher_buffer);
-    Recursive_CCMM_reduce(Q, K, layer + 1, max_layer, seq * 2 + 1, column_num, tmpcipher_buffer+1);
-    scheme.addAndEqual(**tmpcipher_buffer, **(tmpcipher_buffer+1));
+    Recursive_CCMM_reduce(Q, K, layer + 1, max_layer, seq * 2, column_num, cipher_stack);
+    Recursive_CCMM_reduce(Q, K, layer + 1, max_layer, seq * 2 + 1, column_num, cipher_stack+1);
+    scheme.addAndEqual(**cipher_stack, **(cipher_stack+1));
     // if (layer == max_layer - 1)scheme.decrypt_display(sk, *target_cipher, "target_cipher");
     if (layer > 0){
-        if (seq & 1) scheme.leftRotateAddSelf_23(**tmpcipher_buffer, 32768 - (1 << (max_layer - layer)));
-        else scheme.leftRotateAddSelf_23(**tmpcipher_buffer, (1 << (max_layer - layer)));
-        scheme.multConstAndEqual(**tmpcipher_buffer, *column_mask_ccmm[(seq & 1) + 2*(max_layer - layer)]);
-        scheme.rescaleAndEqual(**tmpcipher_buffer);
-        // if (layer == max_layer - 1)scheme.decrypt_display(sk, **tmpcipher_buffer, "tmpcipher_buffer");
+        if (seq & 1) scheme.leftRotateAddSelf_23(**cipher_stack, 32768 - (1 << (max_layer - layer)));
+        else scheme.leftRotateAddSelf_23(**cipher_stack, (1 << (max_layer - layer)));
+        scheme.multConstAndEqual(**cipher_stack, *column_mask_ccmm[(seq & 1) + 2*(max_layer - layer)]);
+        scheme.rescaleAndEqual(**cipher_stack);
+        // if (layer == max_layer - 1)scheme.decrypt_display(sk, **cipher_stack, "cipher_stack");
     }
     return;
+}
+
+void Attention::CCMM_QK_splited_heads(vector<Ciphertext *>& Q, vector<Ciphertext *>& K,vector<Ciphertext *>& O, int column_each_head)
+{
+    if (token_len % column_each_head != 0){
+        printf("wrong splitd");
+    }
+    int yy = token_len / column_each_head;
+
+    int q_len = Q.size();
+    int k_len = K.size();
+    int o_len = O.size();
+    if (q_len != k_len){
+        printf("wrong q_len and k_len");
+    }
+
+    for (int i = 0; i < log2(column_each_head)+1; i++){
+        tmpcipher_buffer[i] = scheme_algo.chebyshev_tree_pool[i];
+    }
+
+    int slots = context.slots;
+    int column_num = slots / token_len;
+
+    if(d * token_len > slots){
+        printf("Error QKV matrix must in one cipher\n");
+    }
+
+    *O[1] = *K[0];
+    *leafnode = *K[0];
+    Recursive_CCMM_reduce(*Q[0], *K[0], 0, log2(column_each_head), 0, column_num, tmpcipher_buffer);
+    *O[0] = **tmpcipher_buffer;
+    for (int time = 1; time < yy; time++){
+        scheme.leftRotateAndEqual_23(*O[time], column_each_head*column_num);
+        if(time+1<yy)*O[time+1] = *O[time];
+        *leafnode = *O[time];
+        
+        Recursive_CCMM_reduce(*Q[0], *O[time], 0, log2(column_each_head), 0, column_num, tmpcipher_buffer);
+        *O[time] = **tmpcipher_buffer;
+    }
+
+    
+    for (int q_sed = 1; q_sed < q_len; q_sed++){
+        *tmp_shift_K = *K[q_sed];
+        *leafnode = *K[q_sed];
+        Recursive_CCMM_reduce(*Q[q_sed], *K[q_sed], 0, log2(column_each_head), 0, column_num, tmpcipher_buffer);
+        scheme.addAndEqual(*O[0], **tmpcipher_buffer);
+        for (int time = 1; time < yy; time++){
+            scheme.leftRotateAndEqual_23(*tmp_shift_K, column_each_head*column_num);
+            *leafnode = *tmp_shift_K;
+            
+            Recursive_CCMM_reduce(*Q[q_sed], *tmp_shift_K, 0, log2(column_each_head), 0, column_num, tmpcipher_buffer);
+            scheme.addAndEqual(*O[time], **tmpcipher_buffer);
+        }
+    }
+}
+
+void Attention::TauAndEqual(Ciphertext& A)
+{
+    Ciphertext* tmp_result_bs;
+    Ciphertext* tmp_result_inside_bs;
+    int diag_num = token_len * head_num;
+    int baby_steps = 4;
+    int giant_steps = 16;
+    for (int i = 0; i < baby_steps; i++){
+        tmpcipher_buffer[i] = scheme_algo.chebyshev_tree_pool[i];
+    }
+    tmp_result_bs = scheme_algo.chebyshev_tree_pool[baby_steps+1];
+    tmp_result_inside_bs = scheme_algo.chebyshev_tree_pool[baby_steps+2];
+
+    for (int i = 0; i < baby_steps; i++){
+        *tmpcipher_buffer[i] = A;
+        if(i>0)scheme.leftRotateAndEqual_23(*tmpcipher_buffer[i], 256*i);
+    }
+
+    for (int j = 0; j < giant_steps; j++){
+        for (int i = 0; i < baby_steps; i++){
+            if(i==0){
+                *tmp_result_bs = *tmpcipher_buffer[i];
+                scheme.multConstAndEqual(*tmp_result_bs, plain_tau_diag[baby_steps*j+i]);
+                scheme.rescaleAndEqual(*tmp_result_bs);
+            }
+            else{
+                *tmp_result_inside_bs = *tmpcipher_buffer[i];
+                scheme.multConstAndEqual(*tmp_result_inside_bs, plain_tau_diag[baby_steps*j+i]);
+                scheme.rescaleAndEqual(*tmp_result_inside_bs);
+                scheme.addAndEqual(*tmp_result_bs, *tmp_result_inside_bs);
+            }
+        }
+        if(j==0){
+            A = *tmp_result_bs;
+        }
+        else{
+            scheme.leftRotateAndEqual_23(*tmp_result_bs, 256*baby_steps*j);
+            scheme.addAndEqual(A, *tmp_result_bs);
+        }
+    }
+}
+
+void Attention::CCMM_V(Ciphertext& sigma_O1, Ciphertext& sigma_O2, Ciphertext& tau_V, Ciphertext& O){
+    int slots = context.slots;
+    int column_num = slots / token_len;
+    Ciphertext* mul_mat1 = scheme_algo.chebyshev_tree_pool[0];
+    Ciphertext* mul_mat2 = scheme_algo.chebyshev_tree_pool[1];
+    Ciphertext* rot_tau_V = scheme_algo.chebyshev_tree_pool[2];
+    Ciphertext* rot_O1 = scheme_algo.chebyshev_tree_pool[3];
+    Ciphertext* rot_O2 = scheme_algo.chebyshev_tree_pool[4];
+    *rot_tau_V = tau_V;
+
+    *rot_O1 = sigma_O1;
+    *rot_O2 = sigma_O2;
+    for (int i = 0; i < d; i++){
+        if (i == 0){
+            O = *rot_O1;
+            scheme.multAndEqual_23(O, *rot_tau_V);
+            scheme.rescaleAndEqual(O);
+        }
+        else{
+            scheme.leftRotateAndEqual_23(*rot_tau_V, column_num);
+            scheme.leftRotateAndEqual_23(*rot_O1, 1);
+            *mul_mat1 = *rot_O1;
+            scheme.multConstAndEqual(*mul_mat1, mask_ccmm_left[i]);
+            scheme.rescaleAndEqual(*mul_mat1);
+
+            if (i == 1){
+                scheme.leftRotateAndEqual_23(*rot_O2, slots - d + 1);
+            }
+            else{
+                scheme.leftRotateAndEqual_23(*rot_O2, 1);
+            }
+            *mul_mat2 = *rot_O2;
+            scheme.multConstAndEqual(*mul_mat2, mask_ccmm_right[i]);
+            scheme.rescaleAndEqual(*mul_mat2);
+
+            scheme.addAndEqual(*mul_mat1, *mul_mat2);
+            scheme.multAndEqual_23(*mul_mat1, *rot_tau_V);
+            scheme.rescaleAndEqual(*mul_mat1);
+            scheme.addAndEqual(O, *mul_mat1);
+        }
+    }
+    *rot_O1 = sigma_O2;
+    *rot_O2 = sigma_O1;
+    for (int i = 0; i < d; i++){
+        if (i == 0){
+            *mul_mat1 = *rot_O1;
+            scheme.leftRotateAndEqual_23(*rot_tau_V, column_num);
+            scheme.multAndEqual_23(*mul_mat1, *rot_tau_V);
+            scheme.rescaleAndEqual(*mul_mat1);
+            scheme.addAndEqual(O, *mul_mat1);
+        }
+        else{
+            scheme.leftRotateAndEqual_23(*rot_tau_V, column_num);
+            scheme.leftRotateAndEqual_23(*rot_O1, 1);
+            *mul_mat1 = *rot_O1;
+            scheme.multConstAndEqual(*mul_mat1, mask_ccmm_left[i]);
+            scheme.rescaleAndEqual(*mul_mat1);
+
+            if (i == 1){
+                scheme.leftRotateAndEqual_23(*rot_O2, slots - d + 1);
+            }
+            else{
+                scheme.leftRotateAndEqual_23(*rot_O2, 1);
+            }
+            *mul_mat2 = *rot_O2;
+            scheme.multConstAndEqual(*mul_mat2, mask_ccmm_right[i]);
+            scheme.rescaleAndEqual(*mul_mat2);
+
+            scheme.addAndEqual(*mul_mat1, *mul_mat2);
+            scheme.multAndEqual_23(*mul_mat1, *rot_tau_V);
+            scheme.rescaleAndEqual(*mul_mat1);
+            scheme.addAndEqual(O, *mul_mat1);
+        }
+    }
 }
