@@ -27,6 +27,7 @@ public:
     int d;
     int token_len;
     double softmax_x_max;
+    double activate_x_max;
 
     vector<Plaintext*> column_mask_reduce;
     vector<Plaintext*> column_mask_ccmm;
@@ -59,10 +60,14 @@ public:
     void evalSqrtInv(Ciphertext& cipher, SecretKey& sk, double upper_bound = 1.0);
 
     // SoftMax function: exp(x_i) / sum(exp(x_j))
-    void evalSoftMax(Ciphertext& cipher);
+    void evalSoftMax(vector<Ciphertext*>& cipher_P);
 
     // Layer Normalization: normalize each row of the matrix
     void LayerNorm(Ciphertext& cipher);
+
+    vector<Ciphertext*> nonlieanr_buffer;
+
+    /********************************CCMM for Multi-head Attention*******************************/
 
     // Q and K are the ciphertext in colomn packing
     // compute Q * K ^ T

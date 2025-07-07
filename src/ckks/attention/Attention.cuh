@@ -29,10 +29,16 @@ Attention::Attention(Context_23& context, Scheme_23& scheme, SchemeAlgo& scheme_
     }
 
 
-    sigmoid_cheby_coeffs = {0.5, 0.5876811235265726, -2.007269726835591e-17, -0.12149623872303088, 
-        -2.0072697268355913e-17, 0.035317888765259355, -1.0917210757920756e-16, -0.010693712782924763, 
-        -1.8652562430325655e-16, 0.003260293428351401, -2.2019441004172328e-16, -0.0009931752451993756, 
-        -9.895698703494615e-18, 0.00029550137814745605, -1.761892554953261e-17, -6.453127146099342e-05};
+
+    // sigmoid_cheby_coeffs = {0.5, 0.5876811235265726, -2.007269726835591e-17, -0.12149623872303088, 
+    //     -2.0072697268355913e-17, 0.035317888765259355, -1.0917210757920756e-16, -0.010693712782924763, 
+    //     -1.8652562430325655e-16, 0.003260293428351401, -2.2019441004172328e-16, -0.0009931752451993756, 
+    //     -9.895698703494615e-18, 0.00029550137814745605, -1.761892554953261e-17, -6.453127146099342e-05};
+    sigmoid_cheby_coeffs = {0.4999999999999999, 0.5876811283760183, -1.2245589764298666e-16, -0.12149626092930495, 
+        9.11654200268892e-17, 0.03531796339510528, 2.500215614893023e-16, -0.010693957687070982, 
+        2.6705411550039875e-16, 0.0032610953439276167, 4.965267385241698e-16, -0.000995800506585915, 
+        5.013755013555445e-16, 0.00030409563293387924, 2.66463491171798e-16, -9.266603859557535e-05, 
+        5.512919147316323e-16, 2.757290625878708e-05, 3.833288719350705e-16, -6.021416971387329e-06};
     int sigmoid_tree_node_num = 1<<int(ceil(log2(sigmoid_cheby_coeffs.size())));
     for(int i = 0; i < sigmoid_tree_node_num; i++)
     {
@@ -48,10 +54,15 @@ Attention::Attention(Context_23& context, Scheme_23& scheme, SchemeAlgo& scheme_
         scheme_algo.call_prepareChebyshevCoeffsTree(logSplit, logDegree, 1, sigmoid_cheby_poly_pool);
     }
     
-    CDF_cheby_coeffs = {0.5, 0.6234577610429392, 8.07567900971873e-17, -0.17602452170600366, 
-        1.1776422425135919e-16, 0.0761747991351066, -1.2929493435476463e-16, -0.03371833834600424, 
-        -1.6116422569495642e-16, 0.014111526810286363, -2.0330980266310844e-16, -0.005444024438389357, 
-        -1.224401966956653e-16, 0.0018840923558029613, -4.5685761667957374e-17, -0.0004415815053097376};
+    // CDF_cheby_coeffs = {0.5, 0.6234577610429392, 8.07567900971873e-17, -0.17602452170600366, 
+    //     1.1776422425135919e-16, 0.0761747991351066, -1.2929493435476463e-16, -0.03371833834600424, 
+    //     -1.6116422569495642e-16, 0.014111526810286363, -2.0330980266310844e-16, -0.005444024438389357, 
+    //     -1.224401966956653e-16, 0.0018840923558029613, -4.5685761667957374e-17, -0.0004415815053097376};
+    CDF_cheby_coeffs = {0.4999999999999999, 0.6234577655281024, 2.1938197590748047e-17, -0.17602455084661336, 
+        3.8397062060234874e-17, 0.07617494799506995, 2.5058771037119205e-16, -0.03371905009934949, 
+        1.9442573437879256e-16, 0.014114717269537384, 6.136919126806236e-16, -0.005457385541723384, 
+        5.961195387018996e-16, 0.0019361656181797757, 2.3980071897640697e-16, -0.0006296867994589113, 
+        5.853325473071143e-16, 0.00018562210307973312, 3.963861460495831e-16, -3.883187839606411e-05};
     int CDF_tree_node_num = 1<<int(ceil(log2(CDF_cheby_coeffs.size())));
     for(int i = 0; i < CDF_tree_node_num; i++)
     {
@@ -68,9 +79,10 @@ Attention::Attention(Context_23& context, Scheme_23& scheme, SchemeAlgo& scheme_
     }
     
     softmax_x_max = 5;
+    activate_x_max = 5;
 
-
-    /**********************************************prepare mask********************************************/
+    /**********************************************prepare softmax mask********************************************/
+    // token length < 128
     int N = context.N;
     int L = context.L;
     int slots = context.slots;
@@ -80,7 +92,7 @@ Attention::Attention(Context_23& context, Scheme_23& scheme, SchemeAlgo& scheme_
     cudaMalloc(&column_mask_buffer_device, sizeof(cuDoubleComplex) * slots);
 
     cout<<"prepare reduce sum mask"<<endl;
-    for(int i = 0; i < d; i++){
+    for(int i = 0; i < 1; i++){
         Plaintext* mask_i = new Plaintext(N, L, L, slots, NTL::RR(context.precision));
         column_mask_reduce.push_back(mask_i);
 
@@ -101,7 +113,9 @@ Attention::Attention(Context_23& context, Scheme_23& scheme, SchemeAlgo& scheme_
 
     K_sqrt_inv = {1.472141915860566, 1.1254419159515154, 1.007928806890655};
 
-
+    for(int i = 0; i < 2; i++){
+        nonlieanr_buffer.push_back(new Ciphertext(N, L, L, slots, NTL::RR(context.precision)));
+    }
     /******************************Q * K^T***********************************/
     // prepare mask for CCMM Q*K^T
     cout<<"prepare Q*K^T mask"<<endl;
@@ -209,6 +223,8 @@ void Attention::addKey(SecretKey& sk)
 {
     cout<<"add CCMM & reduce sum Keys"<<endl;
     printf("log2(d): %lf\n", log2(d));
+    // CCMM Q*K^T
+    // softmax reduce sum
     for(int i = 0; i < log2(d) + 1; i++){
         scheme.addLeftRotKey_23(sk, 1 << i);
         printf("%d, ", 1<<i);
@@ -240,7 +256,7 @@ void Attention::addKey(SecretKey& sk)
 
 void Attention::evalExp(Ciphertext& cipher)
 {
-    scheme.multConstAndEqual(cipher, 0.2);
+    scheme.multConstAndEqual(cipher, 1./softmax_x_max);
     scheme.rescaleAndEqual(cipher);
     scheme.addConstAndEqual(cipher, 1);
 
@@ -254,7 +270,7 @@ void Attention::evalExp(Ciphertext& cipher)
 // CDF function: 0.5 * (1 + erf(x / sqrt(2)))
 void Attention::evalCDF(Ciphertext& cipher)
 {
-    scheme.multConstAndEqual(cipher, 1./softmax_x_max);
+    scheme.multConstAndEqual(cipher, 1./activate_x_max);
     scheme.rescaleAndEqual(cipher);
     NTL::RR target_scale = cipher.scale;
 
@@ -265,7 +281,7 @@ void Attention::evalCDF(Ciphertext& cipher)
 // Sigmoid function: exp(x) / (1 + exp(x))
 void Attention::evalSigmoid(Ciphertext& cipher)
 {
-    scheme.multConstAndEqual(cipher, 0.2);
+    scheme.multConstAndEqual(cipher, 1./activate_x_max);
     scheme.rescaleAndEqual(cipher);
     NTL::RR target_scale = cipher.scale;
 
@@ -406,25 +422,49 @@ void Attention::evalSqrtInv(Ciphertext& cipher, SecretKey& sk, double upper_boun
     cipher = *bx;
 }
 
-void Attention::evalSoftMax(Ciphertext& cipher)
+void Attention::evalSoftMax(vector<Ciphertext*>& cipher_P)
 {
-    // e^(x_i - x_max)
-    scheme.addConstAndEqual(cipher, -softmax_x_max);
-    evalExp(cipher);
-
-    // reduce sum and repeat
-    // reduce sum
-    int n = token_len;
-    for(int i = log(n) + 1; i >= 0; i--){
-        scheme.leftRotateAddSelf_23(cipher, 1 << i);
-        // printf("reduce sum id: %d\n", 1<<i);
+    if(cipher_P.size() != token_len / d){
+        printf("Error: cipher_P size must be equal to token_len / d\n");
+        return;
     }
-    scheme.multConstAndEqual(cipher, *column_mask_reduce[0]);
-    scheme.rescaleAndEqual(cipher);
 
-    // repeate
-    for(int i = 0; i < log(n) + 1; i++){
-        scheme.leftRotateAddSelf_23(cipher, 32768 - (1 << i));
+    for(int i = 0; i < token_len / d; i++){
+        scheme.addConstAndEqual(*cipher_P[i], -softmax_x_max);
+        evalExp(*cipher_P[i]);
+        // Bootstrapping here
+    }
+
+    for(int i = 0; i < token_len / d; i++){
+        *nonlieanr_buffer[1] = *cipher_P[i];
+
+        // reduce sum and repeat
+        // reduce sum
+        for(int j = log2(d) - 1; j >= 0; j--){
+            scheme.leftRotateAddSelf_23(*nonlieanr_buffer[1], 1 << j);
+            // printf("reduce sum id: %d\n", 1<<i);
+        }
+        scheme.multConstAndEqual(*nonlieanr_buffer[1], *column_mask_reduce[0]);
+        scheme.rescaleAndEqual(*nonlieanr_buffer[1]);
+
+        // repeate
+        for(int j = 0; j < log2(d); j++){
+            scheme.leftRotateAddSelf_23(*nonlieanr_buffer[1], 32768 - (1 << j));
+        }
+        if(i == 0){
+            *nonlieanr_buffer[0] = *nonlieanr_buffer[1];
+        } else {
+            scheme.addAndEqual(*nonlieanr_buffer[0], *nonlieanr_buffer[1]);
+        }
+    }
+
+    // sum{exp(x)} < n / 4 ??
+    evalInv(*nonlieanr_buffer[0], token_len / 4);
+
+    for(int i = 0; i < token_len / d; i++){
+        // exp(x) / sum(exp(x))
+        scheme.multAndEqual_23(*cipher_P[i], *nonlieanr_buffer[0]);
+        scheme.rescaleAndEqual(*cipher_P[i]);
     }
 }
 

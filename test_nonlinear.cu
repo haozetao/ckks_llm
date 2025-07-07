@@ -72,26 +72,29 @@ float temp = 0;
         attention_scheme.addKey(sk);
 
 
-    cuDoubleComplex* mes1;
+    cuDoubleComplex* mes1, *mes2;
 	mes1 = new cuDoubleComplex[slots];
+	mes2 = new cuDoubleComplex[slots];
 
-    randomComplexArray(mes1, slots, 6, 10);
+    randomComplexArray(mes1, slots, -5, 5);
+    randomComplexArray(mes2, slots, -5, 5);
 
-    cuDoubleComplex* complex_msg1, *complex_msg2, *complex_msg3;
+    cuDoubleComplex* complex_msg1, *complex_msg2;
     cudaMalloc(&complex_msg1, sizeof(cuDoubleComplex) * slots);
     cudaMalloc(&complex_msg2, sizeof(cuDoubleComplex) * slots);
-    cudaMalloc(&complex_msg3, sizeof(cuDoubleComplex) * slots);
 
 	cudaMemcpy(complex_msg1, mes1, sizeof(cuDoubleComplex) * slots, cudaMemcpyHostToDevice);
+	cudaMemcpy(complex_msg2, mes2, sizeof(cuDoubleComplex) * slots, cudaMemcpyHostToDevice);
 
     
     print_device_array(complex_msg1, 8, "message1");
+    print_device_array(complex_msg2, 8, "message2");
 
     int target_level = L;
     // for(target_level; target_level >= 0; target_level--)
     {
         Plaintext plain_m1(N, L, target_level, slots, NTL::RR(context.precision));
-        // Plaintext plain_m2(N, L, target_level, slots, NTL::RR(context.precision));
+        Plaintext plain_m2(N, L, target_level, slots, NTL::RR(context.precision));
 
         Ciphertext c1(N, L, L, slots, NTL::RR(context.precision));
         Ciphertext c2(N, L, L, slots, NTL::RR(context.precision));
@@ -99,6 +102,8 @@ float temp = 0;
 
         cuDoubleComplex* complex_msg_dec;
         cudaMalloc(&complex_msg_dec, sizeof(cuDoubleComplex) * slots);
+
+        vector<Ciphertext*> cipher_P = {&c1, &c2};
 
         for(int i = 0; i < 1; i++)
         {
@@ -108,10 +113,11 @@ float temp = 0;
             cudaEventSynchronize(end);
             cudaEventElapsedTime(&temp, start, end);
             ecd = min(ecd, temp);
-                // context.encode(complex_msg1, plain_m2);
+                context.encode(complex_msg2, plain_m2);
 
             cudaEventRecord(start);
                 scheme.encryptMsg(c1, plain_m1);
+                scheme.encryptMsg(c2, plain_m2);
             cudaEventRecord(end);
             cudaEventSynchronize(end);
             cudaEventElapsedTime(&temp, start, end);
@@ -119,13 +125,12 @@ float temp = 0;
 
 
 
-            c2 = c1;
             cout<<"c1.level before nonlinear: "<<c1.l <<"  scale: "<<c1.scale<<endl;
             cuTimer.start();
                 // attention_scheme.evalExp(c1);
                 // attention_scheme.evalInv(c1, 10);
-                attention_scheme.evalSqrtInv(c1, sk, 10);
-                // attention_scheme.evalSoftMax(c1);
+                // attention_scheme.evalSqrtInv(c1, sk, 10);
+                attention_scheme.evalSoftMax(cipher_P);
 
                 // attention_scheme.evalGeLU(c1);
                 // attention_scheme.evalSiLU(c1);
@@ -157,24 +162,59 @@ float temp = 0;
         cudaEventElapsedTime(&temp, start, end);
         dcd = min(dcd, temp);
         // print_device_array(complex_msg_dec, 8, "message_dec1");
-        scheme.decrypt_display(sk, c1, "approx 1/sqrt(x)");
+        scheme.decrypt_display(sk, c1, "approx softmax");
 
-        vector<cuDoubleComplex> values_computed(slots);
+        vector<cuDoubleComplex> values_computed(slots*2);
+
+        scheme.decryptMsg(m1_dec, sk, c1);
+        context.decode(m1_dec, complex_msg_dec);
         cudaMemcpy(values_computed.data(), complex_msg_dec, sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);
+        scheme.decryptMsg(m1_dec, sk, c2);
+        context.decode(m1_dec, complex_msg_dec);
+        cudaMemcpy(values_computed.data() + slots, complex_msg_dec, sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);
 
-        vector<cuDoubleComplex> values_want(slots);
+        vector<cuDoubleComplex> values_want(slots*2);
         cudaMemcpy(values_want.data(), complex_msg1, sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);
+        cudaMemcpy(values_want.data() + slots, complex_msg2, sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);
         cout<<"target: ";
-        for(int i = 0; i < slots; i++){
-            double x = values_want[i].x;
-            // values_want[i].x = 1/x;
-            values_want[i].x = 1/pow(x, 0.5);
-            // values_want[i].x = exp(x);
-            // values_want[i].x = x * normcdf(x);
-            // values_want[i].x = x * (1 / (1+exp(-x)));
-            if(i < 8) printf("%.8lf, ", values_want[i].x);
+        // verify nonlinear
+        // for(int i = 0; i < slots; i++){
+        //     double x = values_want[i].x;
+        //     // values_want[i].x = 1/x;
+        //     // values_want[i].x = 1/pow(x, 0.5);
+        //     // values_want[i].x = exp(x);
+        //     // values_want[i].x = x * normcdf(x);
+        //     // values_want[i].x = x * (1 / (1+exp(-x)));
+        //     if(i < 8) printf("%.8lf, ", values_want[i].x);
+        // }
+
+        // verify softmax
+        int token_len = attention_scheme.token_len;
+        int d = attention_scheme.d;
+        // 256 columns
+        for(int row_id = 0; row_id < token_len; row_id++){
+            int row_len = slots / token_len;
+            for(int block_id = 0; block_id < row_len / d; block_id++){
+                double sum = 0;
+                for(int i = 0; i < token_len; i++){
+                    int offset = (i/d)*slots + (i%d);
+                    double exp_x = exp(values_want[row_id * row_len + block_id * d + offset].x - attention_scheme.softmax_x_max);
+                    values_want[row_id * row_len + block_id * d + offset].x = exp_x;
+                    sum += exp_x;
+                }
+
+                for(int i = 0; i < token_len; i++){
+                    int offset = + (i%d) + (i/d)*slots;
+                    values_want[row_id * row_len + block_id * d + offset].x /= sum;
+                }
+
+                if(row_id == 0 && block_id == 0)
+                {
+                    for(int i = 0; i < 8; i++)
+                        printf("%.8lf, ", values_want[row_id * row_len + block_id * d + i].x);
+                }
+            }
         }
-        cout<<endl;
 
         auto status = GetPrecisionStats(values_computed, values_want);
         cout<<status.String();
