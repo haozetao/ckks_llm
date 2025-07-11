@@ -131,6 +131,10 @@ __host__ void PCMM_Scheme::PPMM(float* plain_mat, vector<MLWECiphertext*> mlwe_c
         cout << "matrix K should be equal to N1!" << endl;
         return;
     }
+    if(mat_N != mlwe_cipher_decomposed.size()){
+        cout << "matrix N should be equal to mlwe number!" << endl;
+        return;
+    }
     int N = scheme.context.N;
     
     int N1 = pcmm_context.N1;
@@ -162,7 +166,7 @@ __host__ void PCMM_Scheme::PPMM(float* plain_mat, vector<MLWECiphertext*> mlwe_c
     cout<<"smem size:" << SMem_size<<endl;
 
     // each block handles a 32*32 tile
-    dim3 ppmm_block(mat_M / TILE_WIDTH_M, N1 * (mlwe_rank + 1) / TILE_WIDTH_K);
+    dim3 ppmm_block(mat_M / TILE_WIDTH_M, mat_K * (mlwe_rank + 1) / TILE_WIDTH_K);
     // 4 warps, each warp handles 16*16
     // each thread handles 1*16*8
     dim3 ppmm_thread(32, (TILE_WIDTH_M*TILE_WIDTH_K) / (16*16));
@@ -182,11 +186,25 @@ __host__ void PCMM_Scheme::PPMM(float* plain_mat, vector<MLWECiphertext*> mlwe_c
             pcmm_cuda_core_kernel<32, 32, 32, 256, 4> <<<ppmm_block, ppmm_thread>>>(plain_mat, repacking_cipher_pointer_device, ppmm_output, N1, mlwe_rank, ringpack_q_count, ringpack_p_count, scaler, 
                 context.qiInvVecModql_device + l*(l-1)/2, context.qiInvVecModql_shoup_device + l*(l-1)/2);
                 cout<<"call 1 mat_N = "<<256<<endl;
+        } else if (mat_N == 512){
+            // 设置shared_memory 大小
+            cudaFuncSetAttribute(&pcmm_cuda_core_kernel<32, 32, 32, 512, 4>, cudaFuncAttributeMaxDynamicSharedMemorySize, SMem_size);
+            pcmm_cuda_core_kernel<32, 32, 32, 512, 4> <<<ppmm_block, ppmm_thread>>>(plain_mat, repacking_cipher_pointer_device, ppmm_output, N1, mlwe_rank, ringpack_q_count, ringpack_p_count, scaler, 
+                context.qiInvVecModql_device + l*(l-1)/2, context.qiInvVecModql_shoup_device + l*(l-1)/2);
+                cout<<"call 1 mat_N = "<<512<<endl;
+        } else if (mat_N == 768){
+            // 设置shared_memory 大小
+            cudaFuncSetAttribute(&pcmm_cuda_core_kernel<32, 32, 32, 768, 4>, cudaFuncAttributeMaxDynamicSharedMemorySize, SMem_size);
+            pcmm_cuda_core_kernel<32, 32, 32, 768, 4> <<<ppmm_block, ppmm_thread>>>(plain_mat, repacking_cipher_pointer_device, ppmm_output, N1, mlwe_rank, ringpack_q_count, ringpack_p_count, scaler, 
+                context.qiInvVecModql_device + l*(l-1)/2, context.qiInvVecModql_shoup_device + l*(l-1)/2);
+                cout<<"call 1 mat_N = "<<768<<endl;
         }
     } else {
         cout << "tile size should be equal to 32!" << endl;
         return;
     }
+
+    printf("pcmm_block(%d, %d)\n", mat_M / TILE_WIDTH_M, mat_K * (mlwe_rank + 1) / TILE_WIDTH_K);
 
     for(int i = 0; i < mlwe_num; i++){
         mlwe_cipher_decomposed[i]->scale = mlwe_cipher_decomposed[i]->scale * scaler / pcmm_context.q_ringpack[1];

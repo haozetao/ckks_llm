@@ -13,7 +13,7 @@ PCMM_Scheme::PCMM_Scheme(PCMM_Context& pcmm_context, Scheme_23& scheme, Bootstra
     repacking_cipher_pointer = vector<uint64_tt*>(mlwe_rank, nullptr);
     cudaMalloc(&repacking_cipher_pointer_device, sizeof(uint64_tt*) * mlwe_rank);
 
-    cudaMalloc(&ppmm_output, sizeof(uint64_tt) * N1 * (mlwe_rank+1) * 256 * pcmm_context.ringpack_q_count);
+    cudaMalloc(&ppmm_output, sizeof(uint64_tt) * N1 * (mlwe_rank+1) * mlwe_rank * pcmm_context.ringpack_q_count);
 }
 
 __host__ void PCMM_Scheme::convertMLWESKfromRLWESK(MLWESecretKey& mlwe_sk, SecretKey& rlwe_sk)
@@ -110,9 +110,12 @@ __host__ void PCMM_Scheme::rlweCipherDecompose(Ciphertext& rlwe_cipher, vector<M
     dim3 rlweCipherDecompose_dim(N1 / ringSwitch_block, l + 1, mlwe_num);
     if(mlwe_rank == 256){
         rlweCipherDecompose_kernel <256> <<< rlweCipherDecompose_dim, ringSwitch_block >>> (rlwe_cipher.cipher_device, repacking_cipher_pointer_device, N, N1, mlwe_num, mlwe_L, L, p_num);
+    } else if(mlwe_rank == 512) {
+        rlweCipherDecompose_kernel <512> <<< rlweCipherDecompose_dim, ringSwitch_block >>> (rlwe_cipher.cipher_device, repacking_cipher_pointer_device, N, N1, mlwe_num, mlwe_L, L, p_num);
     } else {
         cout << "mlwe rank not supported!" << endl;
     }
+    // printf("blockdim:(%d, %d, %d) N:%d, N1:%d, mlwe_num:%d, mlwe_L:%d\n", rlweCipherDecompose_dim.x, rlweCipherDecompose_dim.y, rlweCipherDecompose_dim.z, N, N1, mlwe_num, mlwe_L);
     context.ToNTTInplace(rlwe_cipher.cipher_device, 0, K, 2, l + 1, L + 1);
 }
 
@@ -369,7 +372,9 @@ __host__ void PCMM_Scheme::mlweCipherPacking(Ciphertext& rlwe_cipher, vector<MLW
     //     // return;
     // }
 
-    if(mlwe_rank == 256){
+    cudaDeviceSynchronize();
+    // if(mlwe_rank == 256)
+    {
         // Combine k mlwe_{N/k,k} -> 1 mlwe_{N,k}, then ModUp q0 -> pq0
         // small mlwe (a0,a1,...,ak-1,b) mod q0, ..., mod qi
         // big   mlwe (a0) mod p, q0, ..., qi   (a1), ... (ak-1), b
@@ -393,7 +398,14 @@ __host__ void PCMM_Scheme::mlweCipherPacking(Ciphertext& rlwe_cipher, vector<MLW
         // output = \sum{big_mlwe.a[i] * repacking_keys[i]}
         dim3 mlweCipherPacking_dim(N / ringSwitch_block, ringpack_pq_count - 1);
         uint64_tt* mult_key_output = scheme.modUp_TtoQj_buffer;
+
+        if(mlwe_rank == 256){
         mlweCipherMultRepackingKey_kernel <256> <<< mlweCipherPacking_dim, ringSwitch_block >>> (mult_key_output, embeded_mlwe_buffer, repackingKeys[0]->ax_device, N1, N, ringpack_pq_count - 1);
+        } else if (mlwe_rank == 512) {
+        mlweCipherMultRepackingKey_kernel <512> <<< mlweCipherPacking_dim, ringSwitch_block >>> (mult_key_output, embeded_mlwe_buffer, repackingKeys[0]->ax_device, N1, N, ringpack_pq_count - 1);
+        } else {
+            cout << "mlwe rank not supported!" << endl;
+        }
 
         context.FromNTTInplace(mult_key_output, 0, K - ringpack_p_count, 2, ringpack_pq_count - 1, ringpack_pq_count - 1);
 
@@ -408,8 +420,6 @@ __host__ void PCMM_Scheme::mlweCipherPacking(Ciphertext& rlwe_cipher, vector<MLW
         poly_add_batch_device(rlwe_cipher.bx_device, embeded_mlwe_buffer + (ringpack_pq_count-1)*N*mlwe_rank + ringpack_p_count*N, N, 0, 0, K, ringpack_q_count - 1);
 
         context.ToNTTInplace(rlwe_cipher.cipher_device, 0, K, 2, ringpack_q_count - 1, L+1);
-    } else {
-        cout << "mlwe rank not supported!" << endl;
     }
 }
 
@@ -442,31 +452,42 @@ __host__ void PCMM_Scheme::PCMM_Boot(float* plain_mat, Ciphertext& rlwe_cipher, 
 
     rlweCipherDecompose(rlwe_cipher, mlwe_cipher_buffer);
 
-    PPMM(plain_mat, mlwe_cipher_buffer, mat_M, mat_N, mat_K);
+    // PPMM(plain_mat, mlwe_cipher_buffer, mat_M, mat_N, mat_K);
 
     mlweCipherPacking(rlwe_cipher, mlwe_cipher_buffer);
 
+
+    // scheme.decrypt_display(scheme_algo.secretkey, cipher, "ctReal after stc ");
+	// Step 1: scale to q0/|m|
+    // q0 / message_ratio = q0 / 4.0 == input.scale
+	// Step 2 : Extend the basis from q to Q
     bootstrapper.modUpQ0toQL(rlwe_cipher);
 
     encodingMatrix.EvalCoeffsToSlots(encodingMatrix.m_U0hatTPreFFT, rlwe_cipher);
 
-    bootstrapper.newResetScale(rlwe_cipher);
-
+    // real = a-bi
     scheme.conjugate_23(*bootstrapper.ctReal, rlwe_cipher);
-    scheme.sub(*bootstrapper.ctImag, rlwe_cipher, *bootstrapper.ctReal);
-    
-    // Real part * 2
-    scheme.addAndEqual(*bootstrapper.ctReal, rlwe_cipher);
-    // Imag part
-    scheme.divByiAndEqual(*bootstrapper.ctImag);
 
+
+    // imag = cipher - real = 2bi
+    scheme.sub(*bootstrapper.ctImag, rlwe_cipher, *bootstrapper.ctReal);
+    // real = real + cipher = 2a
+    scheme.addAndEqual(*bootstrapper.ctReal, rlwe_cipher);
+
+    scheme.divByiAndEqual(*bootstrapper.ctImag);
     bootstrapper.EvalModAndEqual(*bootstrapper.ctReal);
     bootstrapper.EvalModAndEqual(*bootstrapper.ctImag);
 
-    scheme.mulByiAndEqual(*bootstrapper.ctImag);
-    scheme.add(rlwe_cipher, *bootstrapper.ctReal, *bootstrapper.ctImag);
+    scheme.multConstAndEqual(*bootstrapper.ctReal, 256./16*16);
+    scheme.multConstAndEqual(*bootstrapper.ctImag, 256./16*16);
 
-    scheme.multConstAndEqual(rlwe_cipher, 256./16*16);
+    
+    // // Real part * 2
+    // scheme.addAndEqual(rlwe_cipher, *bootstrapper.ctReal);
+    // // // c1.l -= 4;
+    // bootstrapper.EvalModAndEqual(rlwe_cipher);
+
+    // scheme.multConstAndEqual(rlwe_cipher, 256./16*16);
 }
 
 
@@ -510,6 +531,8 @@ __host__ void PCMM_Scheme::mlweDecrypt(MLWECiphertext& mlwe_cipher, MLWESecretKe
     dim3 mlweDecrypt_dim(N1 / mlweDecrypt_block, l + 1);
     if(mlwe_rank == 256){
         mlweDecrypt_kernel <256> <<< mlweDecrypt_dim, mlweDecrypt_block >>> (mlwe_cipher.cipher_device, mlwe_sk.sx_device + ringpack_p_count*N1*mlwe_rank, mlwe_plain.mx_device, N1, p_num);
+    } else if(mlwe_rank == 512) {
+        mlweDecrypt_kernel <512> <<< mlweDecrypt_dim, mlweDecrypt_block >>> (mlwe_cipher.cipher_device, mlwe_sk.sx_device + ringpack_p_count*N1*mlwe_rank, mlwe_plain.mx_device, N1, p_num);
     } else {
         cout << "mlwe rank not supported!" << endl;
     }

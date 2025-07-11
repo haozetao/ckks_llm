@@ -499,7 +499,7 @@ void Scheme_23::decrypt_display(SecretKey& sk, Ciphertext& cipher, char* s, int 
     double max_value = 0;
     for(int i = 0; i < 8; i++)
     {
-        printf("%.8lf, ", array_PQ[i].x);
+        printf("%.8lf + %.8f*i, ", array_PQ[i].x, array_PQ[i].y);
         // if(i % row_num == row_num - 1) printf("\n");
         max_value = max(max_value, array_PQ[i].x);
     }

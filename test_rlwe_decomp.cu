@@ -6,17 +6,18 @@
 
 using namespace std;
 
-#include "include/Context_23.cuh"
-#include "include/TimeUtils.cuh"
-#include "include/pcmm/PCMM_Context.cuh"
-#include "include/pcmm/PCMM_Scheme.cuh"
-#include "include/precision.cuh"
+#include "src/ckks/include/Context_23.cuh"
+#include "src/ckks/include/TimeUtils.cuh"
+#include "src/ckks/include/pcmm/PCMM_Context.cuh"
+#include "src/ckks/include/pcmm/PCMM_Scheme.cuh"
+#include "src/ckks/include/precision.cuh"
 
 int main(int argc, char* argv[])
 {
-    if(argc != 2) return 0;
+    if(argc != 3) return 0;
 
     int logN = atoi(argv[1]);
+    int PCMM_N1 = atoi(argv[2]);
     int logslots = logN - 1;
 
     Context_23 context(logN, logslots, 192);
@@ -30,7 +31,6 @@ int main(int argc, char* argv[])
     int L = context.L;
     int K = context.K;
 
-    int PCMM_N1 = 256;
     int mlwe_rank = N / PCMM_N1;
     // ring packing always works on level0 ???
     vector<uint64_tt> p_ringpack = {context.pVec[context.p_num - 1]};
@@ -41,7 +41,7 @@ int main(int argc, char* argv[])
     SecretKey sk(context);
 
     SchemeAlgo scheme_algo(context, scheme, sk);
-    EncodingMatrix encodingMatrix(sk, scheme, 3, 3, 1);
+    EncodingMatrix encodingMatrix(sk, scheme, 4, 4, 1);
     Bootstrapper boostrapper(context, scheme, scheme_algo, sk, encodingMatrix, 1);
         // boostrapper.addBootstrappingKey(sk);
 
@@ -78,10 +78,10 @@ int main(int argc, char* argv[])
     float temp = 0;
     int target_level = 1;
 
-    int mat_M = 256, mat_N = 256;
+    int mat_M = mlwe_rank, mat_N = mlwe_rank;
     float* plain_mat_host = new float[mat_M * mat_N];
     for(int i = 0; i < mat_M * mat_N; i++){
-        plain_mat_host[i] = (float)(i % 256) / 10000;
+        plain_mat_host[i] = (float)(i % PCMM_N1) / 10000;
     }
     float* plain_mat_device;
     cudaMalloc(&plain_mat_device, sizeof(float) * mat_M * mat_N);
@@ -90,6 +90,7 @@ int main(int argc, char* argv[])
     // for(target_level; target_level >= 0; target_level--)
     {
         int decomp_num = N / PCMM_N1;
+        cout<<"decomp_num: "<<decomp_num<<endl;
         vector<MLWECiphertext*> mlwe_cipher_decomposed;
         for(int i = 0; i < decomp_num; i++){
             MLWECiphertext* mlwe_cipher = new MLWECiphertext(PCMM_N1, q_ringpack_count - 1, q_ringpack_count - 1, mlwe_rank, NTL::RR(context.precision));

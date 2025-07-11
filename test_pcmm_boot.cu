@@ -6,18 +6,19 @@
 
 using namespace std;
 
-#include "include/Context_23.cuh"
-#include "include/TimeUtils.cuh"
-#include "include/pcmm/PCMM_Context.cuh"
-#include "include/pcmm/PCMM_Scheme.cuh"
-#include "include/precision.cuh"
+#include "src/ckks/include/Context_23.cuh"
+#include "src/ckks/include/TimeUtils.cuh"
+#include "src/ckks/include/pcmm/PCMM_Context.cuh"
+#include "src/ckks/include/pcmm/PCMM_Scheme.cuh"
+#include "src/ckks/include/precision.cuh"
 
 int main(int argc, char* argv[])
 {
-    if(argc != 2) return 0;
+    if(argc != 3) return 0;
 
     int logN = atoi(argv[1]);
     int logslots = logN - 1;
+    int PCMM_N1 = atoi(argv[2]);
 
     Context_23 context(logN, logslots, 192);
     Scheme_23 scheme(context);
@@ -30,7 +31,6 @@ int main(int argc, char* argv[])
     int L = context.L;
     int K = context.K;
 
-    int PCMM_N1 = 256;
     int mlwe_rank = N / PCMM_N1;
     // ring packing always works on level0 ???
     vector<uint64_tt> p_ringpack = {context.pVec[context.p_num - 1]};
@@ -42,7 +42,7 @@ int main(int argc, char* argv[])
 
     SchemeAlgo scheme_algo(context, scheme, sk);
     int s2c_level_cost = 3, c2s_level_cost = 3;
-    EncodingMatrix encodingMatrix(sk, scheme, s2c_level_cost, c2s_level_cost, 1);
+    EncodingMatrix encodingMatrix(sk, scheme, 4, 4, 1);
     Bootstrapper bootstrapper(context, scheme, scheme_algo, sk, encodingMatrix, 1);
         bootstrapper.addBootstrappingKey(sk);
 
@@ -57,7 +57,7 @@ int main(int argc, char* argv[])
     pcmm_scheme.addRepakcingKey(mlwe_sk, sk);
     
     cuDoubleComplex* message_host = new cuDoubleComplex[slots];
-    randomComplexArray(message_host, slots, 1./10);
+    randomComplexArray(message_host, slots, -1./10, 1./10);
     for(int i = 0; i < 8; i++){
         printf("%lf, ", message_host[i]);
     }
@@ -73,6 +73,7 @@ int main(int argc, char* argv[])
         
     float gen_swk = 1000;
     float enc = 1000, dec = 1000, resc = 1000, ntt = 1000, intt = 1000, ecd = 1000, dcd = 1000;
+    float conj_time = 1000;
     float rlwe2mlwe = 1000, ppmm_time = 1000, mlwe2rlwe = 1000;
     float temp = 0;
     int target_level = 1 + s2c_level_cost;
@@ -98,6 +99,7 @@ int main(int argc, char* argv[])
         }
 
         Plaintext plain_m1(N, L, target_level, slots, NTL::RR(context.precision));
+        Plaintext plain_m2(N, L, target_level, slots, NTL::RR(context.precision));
         Plaintext m1_dec(N, L, target_level, slots, NTL::RR(context.precision));
         Plaintext m2_dec(N, L, target_level, slots, NTL::RR(context.precision));
         MLWEPlaintext mlwe_dec(PCMM_N1, q_ringpack_count - 1, q_ringpack_count - 1, NTL::RR(context.precision));
@@ -123,14 +125,26 @@ int main(int argc, char* argv[])
             temp = cuTimer.stop();
             enc = min(ecd, temp);
 
-            c2 = c1;
+
+            cuTimer.start();
+                c2 = c1;
+                scheme.mulByiAndEqual(c2);
+                scheme.addConstAndEqual(c1, 0.1);
+                scheme.addAndEqual(c2, c1);
+            temp = cuTimer.stop();
+            conj_time = min(conj_time, temp);
+            
+            scheme.decrypt_display(sk, c2, "before s2c");
 
             pcmm_scheme.PCMM_Boot(plain_mat_device, c2, mlwe_cipher_decomposed, mat_M, mat_N, PCMM_N1);
 
-            scheme.decrypt_display(sk, c2, "s2c pcmm halfboot");
+
+            scheme.decrypt_display(sk, *bootstrapper.ctReal, "dec real");
+
+            scheme.decrypt_display(sk, *bootstrapper.ctImag, "dec imag");
 
             // scheme.decryptMsg(m2_dec, sk, c2);
-            // // context.decode(m2_dec, dec_message);
+            // // // context.decode(m2_dec, dec_message);
             // context.decode_coeffs(m2_dec, real_msg_dec);
             // print_device_array(real_msg_dec, slots, "repacking decrypt");
         }
@@ -141,7 +155,7 @@ int main(int argc, char* argv[])
         printf("gen swk: %f us\n", gen_swk);
         printf("Time: rlwe2mlwe: %f us, ppmm: %f us, mlwe2rlwe: %f us\n", rlwe2mlwe*1000, ppmm_time*1000, mlwe2rlwe*1000);
 
-        printf("Time: ntt: %f us intt: %f us\n\n", ntt*1000, intt*1000);
+        printf("Time: conj: %f us\n\n", conj_time*1000);
 
 
         getchar();

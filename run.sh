@@ -11,7 +11,7 @@ fi
 file=$1
 
 if [ "${file##*.}"x = "cu"x ];then
-    nvcc -arch=sm_86 $file -o ${file%.*}  -O3 -w -lntl -lgmp
+    nvcc -arch=sm_80 $file -o ${file%.*}  -O3 -w -lntl -lgmp
 fi
 
 # -cudart shared

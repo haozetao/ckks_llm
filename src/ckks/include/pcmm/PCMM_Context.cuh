@@ -146,7 +146,7 @@ __host__ void PCMM_Context::encodeCoeffs(MLWEPlaintext& msg, double* vals)
 
     long long scaler = to_long(msg.scale);
     MLWEEncodeCoeffs_kernel <<< encode_dim, MLWEEncodeCoeffs_block >>> (msg.mx_device, vals, N1, l+1, scaler, p_num);
-    ToNTTInplace(msg.mx_device, 1, l+1, 0, ringpack_p_count, 1);
+    // ToNTTInplace(msg.mx_device, 1, l+1, 0, ringpack_p_count, 1);
 }
 
 __global__ void MLWEDecodeCoeffs_kernel(uint64_tt* data, double* vals, int N1, int mod_num, long long scaler, int p_num)
@@ -253,6 +253,7 @@ void PCMM_Context::ToNTTInplace(uint64_tt* data, int poly_num, int mod_num, int 
     dim3 thread_dim(32, ntt_per_block);
     // cout<<"start_mod_idx: "<<start_mod_idx<<endl;
 
+    if(N1 != 256) return;
     NTT256_kernel <<< ntt_dim, thread_dim, sizeof(uint64_tt) * ntt_per_block * 256, 0>>> (data, poly_num, mod_num, start_poly_idx, start_mod_idx, mod_batch_size, N1, N1_psi_table_device, N1_psi_shoup_table_device);
 }
 
@@ -267,5 +268,6 @@ void PCMM_Context::FromNTTInplace(uint64_tt* data, int poly_num, int mod_num, in
     dim3 thread_dim(32, ntt_per_block);
     // cout<<"start_mod_idx: "<<start_mod_idx<<endl;
 
+    if(N1 != 256) return;
     INTT256_kernel <<< ntt_dim, thread_dim, sizeof(uint64_tt) * ntt_per_block * 256, 0>>> (data, poly_num, mod_num, start_poly_idx, start_mod_idx, mod_batch_size, N1, N1_psiinv_table_device, N1_psiinv_shoup_table_device, N1_inv_device, N1_inv_shoup_device);
 }
