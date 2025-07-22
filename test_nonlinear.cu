@@ -72,32 +72,39 @@ float temp = 0;
         attention_scheme.addKey(sk);
 
 
-    cuDoubleComplex* mes1, *mes2;
+    cuDoubleComplex* mes1, *mes2, *mes3;
 	mes1 = new cuDoubleComplex[slots];
 	mes2 = new cuDoubleComplex[slots];
+    mes3 = new cuDoubleComplex[slots];
 
-    randomComplexArray(mes1, slots, -5, 5);
-    randomComplexArray(mes2, slots, -5, 5);
+    randomComplexArray(mes1, slots, 0, 1);
+    randomComplexArray(mes2, slots, -0.008, 0.009);
+    randomComplexArray(mes3, slots, -0.008, 0.009);
 
-    cuDoubleComplex* complex_msg1, *complex_msg2;
+    cuDoubleComplex* complex_msg1, *complex_msg2, *complex_msg3;
     cudaMalloc(&complex_msg1, sizeof(cuDoubleComplex) * slots);
     cudaMalloc(&complex_msg2, sizeof(cuDoubleComplex) * slots);
+    cudaMalloc(&complex_msg3, sizeof(cuDoubleComplex) * slots);
 
 	cudaMemcpy(complex_msg1, mes1, sizeof(cuDoubleComplex) * slots, cudaMemcpyHostToDevice);
 	cudaMemcpy(complex_msg2, mes2, sizeof(cuDoubleComplex) * slots, cudaMemcpyHostToDevice);
+    cudaMemcpy(complex_msg3, mes3, sizeof(cuDoubleComplex) * slots, cudaMemcpyHostToDevice);
 
     
     print_device_array(complex_msg1, 8, "message1");
     print_device_array(complex_msg2, 8, "message2");
+    print_device_array(complex_msg3, 8, "message2");
 
     int target_level = L;
     // for(target_level; target_level >= 0; target_level--)
     {
         Plaintext plain_m1(N, L, target_level, slots, NTL::RR(context.precision));
         Plaintext plain_m2(N, L, target_level, slots, NTL::RR(context.precision));
+        Plaintext plain_m3(N, L, target_level, slots, NTL::RR(context.precision));
 
         Ciphertext c1(N, L, L, slots, NTL::RR(context.precision));
         Ciphertext c2(N, L, L, slots, NTL::RR(context.precision));
+        Ciphertext c3(N, L, L, slots, NTL::RR(context.precision));
         Plaintext m1_dec(N, L, L, slots, NTL::RR(context.precision));
 
         cuDoubleComplex* complex_msg_dec;
@@ -114,27 +121,36 @@ float temp = 0;
             cudaEventElapsedTime(&temp, start, end);
             ecd = min(ecd, temp);
                 context.encode(complex_msg2, plain_m2);
+                context.encode(complex_msg3, plain_m3);
 
             cudaEventRecord(start);
                 scheme.encryptMsg(c1, plain_m1);
                 scheme.encryptMsg(c2, plain_m2);
+                scheme.encryptMsg(c3, plain_m3);
             cudaEventRecord(end);
             cudaEventSynchronize(end);
             cudaEventElapsedTime(&temp, start, end);
             enc = min(enc, temp);
 
 
-
             cout<<"c1.level before nonlinear: "<<c1.l <<"  scale: "<<c1.scale<<endl;
             cuTimer.start();
                 // attention_scheme.evalExp(c1);
                 // attention_scheme.evalInv(c1, 10);
-                // attention_scheme.evalSqrtInv(c1, sk, 10);
-                attention_scheme.evalSoftMax(cipher_P);
+                // attention_scheme.evalSqrtInv(c1, sk, 10000);
+                // attention_scheme.evalSoftMax(cipher_P);
+                attention_scheme.evalSoftMax_phase1(cipher_P);
+                cout<<"c1.level after evalSoftMax_phase1: "<<c1.l <<"  scale: "<<c1.scale<<endl;
+                attention_scheme.evalSoftMax_phase2(cipher_P);
 
                 // attention_scheme.evalGeLU(c1);
                 // attention_scheme.evalSiLU(c1);
 
+                // vector<Ciphertext*> rlwe_cipher;
+                // rlwe_cipher.push_back(&c1);
+                // rlwe_cipher.push_back(&c2);
+                // rlwe_cipher.push_back(&c3);
+                // attention_scheme.LayerNorm(rlwe_cipher, sk);
             temp = cuTimer.stop();
             cout<<"c1.level after nonlinear: "<<c1.l <<"  scale: "<<c1.scale<<endl;
 
@@ -164,7 +180,9 @@ float temp = 0;
         // print_device_array(complex_msg_dec, 8, "message_dec1");
         scheme.decrypt_display(sk, c1, "approx softmax");
 
+        // vector<cuDoubleComplex> values_computed(slots);
         vector<cuDoubleComplex> values_computed(slots*2);
+        // vector<cuDoubleComplex> values_computed(slots*3);
 
         scheme.decryptMsg(m1_dec, sk, c1);
         context.decode(m1_dec, complex_msg_dec);
@@ -172,21 +190,27 @@ float temp = 0;
         scheme.decryptMsg(m1_dec, sk, c2);
         context.decode(m1_dec, complex_msg_dec);
         cudaMemcpy(values_computed.data() + slots, complex_msg_dec, sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);
+        // scheme.decryptMsg(m1_dec, sk, c3);
+        // context.decode(m1_dec, complex_msg_dec);
+        // cudaMemcpy(values_computed.data() + 2*slots, complex_msg_dec, sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);
 
+        // vector<cuDoubleComplex> values_want(slots);
         vector<cuDoubleComplex> values_want(slots*2);
+        // vector<cuDoubleComplex> values_want(slots*3);
         cudaMemcpy(values_want.data(), complex_msg1, sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);
         cudaMemcpy(values_want.data() + slots, complex_msg2, sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);
+        // cudaMemcpy(values_want.data() + 2*slots, complex_msg3, sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);
         cout<<"target: ";
         // verify nonlinear
-        // for(int i = 0; i < slots; i++){
-        //     double x = values_want[i].x;
-        //     // values_want[i].x = 1/x;
-        //     // values_want[i].x = 1/pow(x, 0.5);
-        //     // values_want[i].x = exp(x);
-        //     // values_want[i].x = x * normcdf(x);
-        //     // values_want[i].x = x * (1 / (1+exp(-x)));
-        //     if(i < 8) printf("%.8lf, ", values_want[i].x);
-        // }
+        for(int i = 0; i < slots; i++){
+            double x = values_want[i].x;
+            // values_want[i].x = 1/x;
+            // values_want[i].x = 1/pow(x, 0.5);
+            // values_want[i].x = exp(x);
+            // values_want[i].x = x * normcdf(x);
+            // values_want[i].x = x * (1 / (1+exp(-x)));
+            if(i < 8) printf("%.8lf, ", values_want[i].x);
+        }
 
         // verify softmax
         int token_len = attention_scheme.token_len;
@@ -215,6 +239,32 @@ float temp = 0;
                 }
             }
         }
+
+        // verify LayerNorm
+        // int token_len = attention_scheme.token_len;
+        // int d = attention_scheme.d;
+        // int column_num = slots / token_len;
+        // for (int i = 0; i < token_len; i++){
+        //     double mu = 0;
+        //     double sigma = 0;
+        //     for (int j = 0; j<column_num;j++){
+        //         mu += values_want[slots*0+column_num*i+j].x;
+        //         mu += values_want[slots*1+column_num*i+j].x;
+        //         mu += values_want[slots*2+column_num*i+j].x;
+        //     }
+        //     mu /= 768;
+        //     for (int j = 0; j<column_num;j++){
+        //         sigma += (values_want[slots*0+column_num*i+j].x-mu)*(values_want[slots*0+column_num*i+j].x-mu);
+        //         sigma += (values_want[slots*1+column_num*i+j].x-mu)*(values_want[slots*1+column_num*i+j].x-mu);
+        //         sigma += (values_want[slots*2+column_num*i+j].x-mu)*(values_want[slots*2+column_num*i+j].x-mu);
+        //     }
+        //     sigma = sqrt(sigma);
+        //     for (int j = 0; j<column_num;j++){
+        //         values_want[slots*0+column_num*i+j].x = (values_want[slots*0+column_num*i+j].x-mu)/sigma;
+        //         values_want[slots*1+column_num*i+j].x = (values_want[slots*1+column_num*i+j].x-mu)/sigma;
+        //         values_want[slots*2+column_num*i+j].x = (values_want[slots*2+column_num*i+j].x-mu)/sigma;
+        //     }
+        // }
 
         auto status = GetPrecisionStats(values_computed, values_want);
         cout<<status.String();

@@ -30,13 +30,13 @@ public:
 
     __host__ void mlweDecrypt(MLWECiphertext& mlwe_cipher, MLWESecretKey& mlwe_sk, MLWEPlaintext& mlwe_plain);
 
-    __host__ void rlweCipherDecompose(Ciphertext& rlwe_cipher, vector<MLWECiphertext*> mlwe_cipher_decomposed);
+    __host__ void rlweCipherDecompose(Ciphertext& rlwe_cipher, vector<MLWECiphertext*> mlwe_cipher_decomposed, uint64_tt mlwe_num, uint64_tt offset);
 
     // modpacking algorithm
     __host__ void addRepakcingKey(MLWESecretKey& mlwe_sk, SecretKey& rlwe_sk);
 
     // modpacking algorithm
-    __host__ void mlweCipherPacking(Ciphertext& rlwe_cipher, vector<MLWECiphertext*> mlwe_cipher_decomposed);
+    __host__ void mlweCipherPacking(Ciphertext& rlwe_cipher, vector<MLWECiphertext*> mlwe_cipher_decomposed, uint64_tt mlwe_num, uint64_tt offset);
 
     __host__ void PPMM(float* plain_mat, vector<MLWECiphertext*> mlwe_cipher_decomposed, int mat_M, int mat_N, int mat_K);
 

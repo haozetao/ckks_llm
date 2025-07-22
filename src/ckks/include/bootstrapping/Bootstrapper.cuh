@@ -104,15 +104,16 @@ void Bootstrapper::addBootstrappingKey(SecretKey& secretKey, cudaStream_t stream
     scheme.addMultKey_23(secretKey, stream);
     boot_key_flag = 1;
 }
-void Bootstrapper::Bootstrapping(Ciphertext& cipher)
+void Bootstrapper::Bootstrapping(Ciphertext& cipher, int target_level = 0)
 {
+    target_level = q_num-1;
     if(is_STC_first){
-        FirstSTCBootstrapping(cipher);
+        FirstSTCBootstrapping(cipher, target_level);
     } else {
-        FirstModUpBootstrapping(cipher);
+        FirstModUpBootstrapping(cipher, target_level);
     }
 }
-void Bootstrapper::FirstSTCBootstrapping(Ciphertext& cipher)
+void Bootstrapper::FirstSTCBootstrapping(Ciphertext& cipher, int target_level)
 {
     if(cipher.l != encodingMatrix.is_sqrt_rescale * encodingMatrix.rescale_times){
         cout<<"bootstrapping cipher not on level0!!!"<<endl;
@@ -129,7 +130,7 @@ void Bootstrapper::FirstSTCBootstrapping(Ciphertext& cipher)
 	// Step 1: scale to q0/|m|
     // q0 / message_ratio = q0 / 4.0 == input.scale
 	// Step 2 : Extend the basis from q to Q
-    modUpQ0toQL(cipher);
+    modUpQ0toQL(cipher, target_level);
 
     encodingMatrix.EvalCoeffsToSlots(encodingMatrix.m_U0hatTPreFFT, cipher);
 
@@ -151,7 +152,7 @@ void Bootstrapper::newResetScale(Ciphertext& cipher)
     scheme.rescaleAndEqual(cipher);
 }
 
-void Bootstrapper::FirstModUpBootstrapping(Ciphertext& cipher)
+void Bootstrapper::FirstModUpBootstrapping(Ciphertext& cipher, int target_level)
 {
     if(cipher.l != 0){
         cout<<"bootstrapping cipher not on level0!!!"<<endl;
@@ -164,7 +165,7 @@ void Bootstrapper::FirstModUpBootstrapping(Ciphertext& cipher)
 	// Step 1: scale to q0/|m|
     // q0 / message_ratio = q0 / 4.0 == input.scale
 	// Step 2 : Extend the basis from q to Q
-    modUpQ0toQL(cipher);
+    modUpQ0toQL(cipher, target_level);
 
     cipher.scale /= 1./ N;
 
@@ -188,7 +189,7 @@ void Bootstrapper::resetScale(Ciphertext& cipher)
 
 
 // modUp then scaleUp
-void Bootstrapper::modUpQ0toQL(Ciphertext& cipher)
+void Bootstrapper::modUpQ0toQL(Ciphertext& cipher, int target_level)
 {
     if(cipher.l != 0) return;
     int N = context.N;
@@ -198,11 +199,11 @@ void Bootstrapper::modUpQ0toQL(Ciphertext& cipher)
     context.FromNTTInplace(cipher.cipher_device, 0, K, 2, cipher.l+1, L+1);
 
     // print_device_array(cipher.cipher_device, N, 2*q_num, "cx1");
-    dim3 modUpQ0toQL_dim(N / modUpQ0toQL_block, q_num-1, 2);
+    dim3 modUpQ0toQL_dim(N / modUpQ0toQL_block, target_level, 2);
 	modUpQ0toQL_kernel <<< modUpQ0toQL_dim, modUpQ0toQL_block >>> (cipher.cipher_device, N, p_num, q_num, context.qVec[0] / context.precision);
     // print_device_array(cipher.cipher_device, N, 2*q_num, "cx2");
 
-    cipher.l = L;
+    cipher.l = target_level;
     context.ToNTTInplace(cipher.cipher_device, 0, K, 2, cipher.l+1, L+1);
     // cout<<"cipher.scale: "<<cipher.scale<<endl;
 }

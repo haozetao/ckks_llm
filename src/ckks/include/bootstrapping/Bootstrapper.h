@@ -80,7 +80,7 @@ public:
 
 	void resetScale(Ciphertext& cipher);
 
-    void modUpQ0toQL(Ciphertext& cipher);
+    void modUpQ0toQL(Ciphertext& cipher, int target_level);
 
 	void subAndSum(Ciphertext& cipher);
 
@@ -90,11 +90,11 @@ public:
 
 	void slotToCoeff(Ciphertext& cipher, Ciphertext& cipherReal, Ciphertext& cipherImag);
 
-	void FirstModUpBootstrapping(Ciphertext& cipher);
+	void FirstModUpBootstrapping(Ciphertext& cipher, int target_level);
 	
-	void FirstSTCBootstrapping(Ciphertext& cipher);
+	void FirstSTCBootstrapping(Ciphertext& cipher, int target_level);
 
 	void newResetScale(Ciphertext& cipher);
 
-	void Bootstrapping(Ciphertext& cipher);
+	void Bootstrapping(Ciphertext& cipher, int target_level);
 };

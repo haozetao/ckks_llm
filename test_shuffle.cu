@@ -90,7 +90,9 @@ int main(int argc, char* argv[])
 
     // for(target_level; target_level >= 0; target_level--)
     {
-        int decomp_num = mlwe_rank / 2;
+        // int decomp_num = mlwe_rank / 2;
+        int decomp_num = 768;
+        cout << "decomp_num = " << decomp_num << endl;
 
         vector<MLWECiphertext*> mlwe_cipher_decomposed;
         for(int i = 0; i < decomp_num; i++){
@@ -105,6 +107,7 @@ int main(int argc, char* argv[])
         MLWEPlaintext mlwe_dec(PCMM_N1, q_ringpack_count - 1, q_ringpack_count - 1, NTL::RR(context.precision));
         Ciphertext c1(N, L, L, slots, NTL::RR(context.precision));
         Ciphertext c2(N, L, L, slots, NTL::RR(context.precision));
+        Ciphertext c3(N, L, L, slots, NTL::RR(context.precision));
 
         double* real_msg_dec;
         cudaMalloc(&real_msg_dec, sizeof(double) * N);
@@ -126,27 +129,51 @@ int main(int argc, char* argv[])
             enc = min(ecd, temp);
 
 
-            cuTimer.start();
-                c2 = c1;
-                // scheme.mulByiAndEqual(c2);
-                // scheme.addConstAndEqual(c1, 0.1);
-                // scheme.addAndEqual(c2, c1);
-            temp = cuTimer.stop();
-            conj_time = min(conj_time, temp);
+            // cuTimer.start();
+            //     c2 = c1;
+            //     scheme.mulByiAndEqual(c2);
+            //     scheme.addConstAndEqual(c1, 0.1);
+            //     scheme.addAndEqual(c2, c1);
+            // temp = cuTimer.stop();
+            // conj_time = min(conj_time, temp);
             
-            scheme.decrypt_display(sk, c2, "before s2c");
+            // scheme.decrypt_display(sk, c2, "before s2c");
+            
+            vector<Ciphertext*> rlwe_cipher;
+            c2 = c1;
+            scheme.addConstAndEqual(c2, 0.1);
+            c3 = c2;
+            scheme.addConstAndEqual(c3, 0.1);
+            
+            rlwe_cipher.push_back(&c1);
+            rlwe_cipher.push_back(&c2);
+            rlwe_cipher.push_back(&c3);
+            
+            scheme.decrypt_display(sk, *rlwe_cipher[0], "before PCMM_Boot_bert c1");
+            scheme.decrypt_display(sk, *rlwe_cipher[1], "before PCMM_Boot_bert c2");
+            scheme.decrypt_display(sk, *rlwe_cipher[2], "before PCMM_Boot_bert c3");
+            // pcmm_scheme.PCMM_Boot(plain_mat_device, c2, mlwe_cipher_decomposed, mat_M, mat_N, PCMM_N1);
+            pcmm_scheme.PCMM_Boot_bert(plain_mat_device, rlwe_cipher, mlwe_cipher_decomposed, mat_M, mat_N, PCMM_N1, rlwe_cipher);
 
-            pcmm_scheme.PCMM_Boot(plain_mat_device, c2, mlwe_cipher_decomposed, mat_M, mat_N, PCMM_N1);
+            scheme.decrypt_display(sk, *rlwe_cipher[0], "dec 0");
+            // scheme.decrypt_display(sk, *rlwe_cipher[2], "dec 2");
 
-
-            // scheme.decrypt_display(sk, *bootstrapper.ctReal, "dec real");
-
-            // scheme.decrypt_display(sk, *bootstrapper.ctImag, "dec imag");
-
-            scheme.decryptMsg(m2_dec, sk, c2);
-            // // context.decode(m2_dec, dec_message);
+            scheme.decryptMsg(m2_dec, sk, *rlwe_cipher[0]);
             context.decode_coeffs(m2_dec, real_msg_dec);
-            print_device_array(real_msg_dec, N, "repacking decrypt");
+            print_device_array(real_msg_dec, slots, "repacking decrypt 0");
+
+            // scheme.decryptMsg(m2_dec, sk, *rlwe_cipher[1]);
+            // context.decode_coeffs(m2_dec, real_msg_dec);
+            // print_device_array(real_msg_dec, slots, "repacking decrypt 1");
+
+            // scheme.decryptMsg(m2_dec, sk, *rlwe_cipher[2]);
+            // context.decode_coeffs(m2_dec, real_msg_dec);
+            // print_device_array(real_msg_dec, slots, "repacking decrypt 2");
+            
+            // scheme.decryptMsg(m2_dec, sk, c2);
+            // // // context.decode(m2_dec, dec_message);
+            // context.decode_coeffs(m2_dec, real_msg_dec);
+            // print_device_array(real_msg_dec, slots, "repacking decrypt");
         }
 
 

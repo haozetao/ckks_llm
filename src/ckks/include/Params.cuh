@@ -153,7 +153,7 @@ void Context_23::getPrimeCKKS(int hamming_weight)
 			0x1ffffffea0001, 0x1ffffffd40001, 0x1ffffffba0001, 0x1ffffffb40001, 
 			0x20000001a0001, 0x20000005e0001, 0x2000000860001, 0x2000000b00001, 
 			0x1ffffffb00001, 0x1ffffffa20001, 0x1ffffff780001, 0x1ffffff5c0001, 
-			// 0x1fffffe5a0001, 0x1fffffe480001, 0x1fffffde80001, 0x1fffffde20001,
+			0x1fffffe5a0001, 0x1fffffe480001, 0x1fffffde80001, 0x1fffffde20001,
 		};
 		pVec = { // 36 x 8
 			// 0x20000e0001, 0x2000140001, 0x20004a0001, 0x2000580001, 
@@ -170,8 +170,8 @@ void Context_23::getPrimeCKKS(int hamming_weight)
 			// 0x1000001440001, 0x10000015e0001, 0x1000001760001, 0x10000017c0001, 
 			// 0x1000001880001, 0x1000001ce0001, // 0x1000001ec0001, 0x1000001fa0001,
 			
-			0x2000001d60001, 0x2000001e80001, 0x2000002020001, 0x2000002260001, 
-			0x2000002600001, 0x20000027e0001, //0x2000002800001, 0x20000029e0001, 
+			//0x2000001d60001, 0x2000001e80001, 0x2000002020001, 0x2000002260001, 
+			0x2000002600001, 0x20000027e0001, 0x2000002800001, 0x20000029e0001, 
 		};
 		tVec = { // 60 x 10
 			0xffffffffffc0001, 0xfffffffff840001,
@@ -179,8 +179,8 @@ void Context_23::getPrimeCKKS(int hamming_weight)
 			0xfffffffff2a0001, 0xfffffffff240001,
 			0xffffffffefe0001, 0xffffffffeca0001,
 
-			0xffffffffd2a0001, 0xffffffffbf20001,
-			0xffffffff1fe0001, // 0xffffffff0c60001,
+			//0xffffffffd2a0001, 0xffffffffbf20001,
+			//0xffffffff1fe0001, // 0xffffffff0c60001,
 			// 0xfffffffef8e0001, // 0xfffffffed1e0001,
 			// 0xfffffffe69e0001, 0xfffffffe4960001,
 
@@ -194,7 +194,7 @@ void Context_23::getPrimeCKKS(int hamming_weight)
 		
 			// 0x7fffffffe900001, 0x7fffffffe3c0001,
 		};
-        gamma = 6;
+        gamma = 4;
 		// len(P) stands for r, len(T) stands for r', gamma stands for tilde_r
 
 		// (1/2pi)^1/4 * cos((x - 0.025) * 5 * pi)

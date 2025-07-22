@@ -2,6 +2,8 @@
 
 #include "PCMM_Scheme.h"
 #include "PPMM_kernel.cuh"
+#include "../TimeUtils.cuh"
+
 
 PCMM_Scheme::PCMM_Scheme(PCMM_Context& pcmm_context, Scheme_23& scheme, Bootstrapper& bootstrapper): pcmm_context(pcmm_context), scheme(scheme), context(scheme.context), bootstrapper(bootstrapper)
 {
@@ -10,10 +12,12 @@ PCMM_Scheme::PCMM_Scheme(PCMM_Context& pcmm_context, Scheme_23& scheme, Bootstra
     int mlwe_rank = pcmm_context.mlwe_rank;
     cudaMalloc(&embeded_mlwe_buffer, sizeof(uint64_tt) * (mlwe_rank+1) * N * (pcmm_context.ringpack_pq_count - 1));
     
-    repacking_cipher_pointer = vector<uint64_tt*>(mlwe_rank, nullptr);
-    cudaMalloc(&repacking_cipher_pointer_device, sizeof(uint64_tt*) * mlwe_rank);
+    // repacking_cipher_pointer = vector<uint64_tt*>(mlwe_rank, nullptr);
+    repacking_cipher_pointer = vector<uint64_tt*>(3072, nullptr);
+    // cudaMalloc(&repacking_cipher_pointer_device, sizeof(uint64_tt*) * mlwe_rank);
+    cudaMalloc(&repacking_cipher_pointer_device, sizeof(uint64_tt*) * 3072);
 
-    cudaMalloc(&ppmm_output, sizeof(uint64_tt) * N1 * (mlwe_rank+1) * mlwe_rank * pcmm_context.ringpack_q_count);
+    cudaMalloc(&ppmm_output, sizeof(uint64_tt) * N1 * (mlwe_rank+1) * 3072 * pcmm_context.ringpack_q_count);
 }
 
 __host__ void PCMM_Scheme::convertMLWESKfromRLWESK(MLWESecretKey& mlwe_sk, SecretKey& rlwe_sk)
@@ -82,7 +86,7 @@ __global__ void rlweCipherDecompose_kernel(uint64_tt* rlwe_device, uint64_tt** m
     }
 }
 
-__host__ void PCMM_Scheme::rlweCipherDecompose(Ciphertext& rlwe_cipher, vector<MLWECiphertext*> mlwe_cipher_decomposed)
+__host__ void PCMM_Scheme::rlweCipherDecompose(Ciphertext& rlwe_cipher, vector<MLWECiphertext*> mlwe_cipher_decomposed, uint64_tt mlwe_num, uint64_tt offset)
 {
     int N = context.N;
     int N1 = pcmm_context.N1;
@@ -94,16 +98,16 @@ __host__ void PCMM_Scheme::rlweCipherDecompose(Ciphertext& rlwe_cipher, vector<M
     int mlwe_L = mlwe_cipher_decomposed[0]->L;
     int K = context.K;
 
-    int mlwe_num = mlwe_cipher_decomposed.size();
-    // if(mlwe_num != mlwe_rank / 2){
-    //     cout << "rlweCipherDecomposeReal need rank / 2 mlwe cipher!" << endl;
-    //     return;
-    // }
+    // int mlwe_num = mlwe_cipher_decomposed.size();
+    if(mlwe_num > mlwe_rank){
+        cout << "rlweCipherDecompose extract number muse <= mlwe_rank" << endl;
+        return;
+    }
     context.FromNTTInplace(rlwe_cipher.cipher_device, 0, K, 2, l + 1, L + 1);
 
     for(int i = 0; i < mlwe_num; i++){
         // repacking_cipher_pointer[mlwe_rank - i - 1] = mlwe_cipher_decomposed[i]->cipher_device;
-        repacking_cipher_pointer[i] = mlwe_cipher_decomposed[i]->cipher_device;
+        repacking_cipher_pointer[i] = mlwe_cipher_decomposed[i + offset]->cipher_device;
     }
     cudaMemcpy(repacking_cipher_pointer_device, repacking_cipher_pointer.data(), sizeof(uint64_tt*) * mlwe_num, cudaMemcpyHostToDevice);
 
@@ -354,7 +358,7 @@ __global__ void mlweCipherEmbedding_new_kernel(uint64_tt* embeded_mlwe_cipher, u
 }
 
 // repacking k mlwe -> 1 rlwe
-__host__ void PCMM_Scheme::mlweCipherPacking(Ciphertext& rlwe_cipher, vector<MLWECiphertext*> mlwe_cipher_decomposed)
+__host__ void PCMM_Scheme::mlweCipherPacking(Ciphertext& rlwe_cipher, vector<MLWECiphertext*> mlwe_cipher_decomposed, uint64_tt mlwe_num, uint64_tt offset)
 {
     int K = scheme.context.K;
     int L = rlwe_cipher.L;
@@ -366,7 +370,8 @@ __host__ void PCMM_Scheme::mlweCipherPacking(Ciphertext& rlwe_cipher, vector<MLW
     int ringpack_q_count = pcmm_context.ringpack_q_count;
     int ringpack_pq_count = pcmm_context.ringpack_pq_count;
 
-    int mlwe_num = mlwe_cipher_decomposed.size();
+    // int mlwe_num = mlwe_cipher_decomposed.size();
+    cout << "in packing mlwe_num = " << mlwe_num << endl;
     // if(mlwe_num != mlwe_rank){
     //     cout << "mlweCipherPackingAll only support packing k mlwe -> 1 rlwe!" << endl;
     //     // return;
@@ -380,7 +385,7 @@ __host__ void PCMM_Scheme::mlweCipherPacking(Ciphertext& rlwe_cipher, vector<MLW
         // big   mlwe (a0) mod p, q0, ..., qi   (a1), ... (ak-1), b
 
         for(int i = 0; i < mlwe_num; i++){
-            repacking_cipher_pointer[i] = mlwe_cipher_decomposed[i]->cipher_device;
+            repacking_cipher_pointer[i] = mlwe_cipher_decomposed[i+offset]->cipher_device;
         }
         cudaMemcpy(repacking_cipher_pointer_device, repacking_cipher_pointer.data(), sizeof(uint64_tt*) * mlwe_num, cudaMemcpyHostToDevice);
 
@@ -437,6 +442,7 @@ __host__ void PCMM_Scheme::PCMM_Boot(float* plain_mat, Ciphertext& rlwe_cipher, 
     int ringpack_pq_count = pcmm_context.ringpack_pq_count;
 
     int mlwe_num = mlwe_cipher_buffer.size();
+    cout << "mlwe_num = " << mlwe_num << endl;
     
     if(mat_K != pcmm_context.N1){
         cout << "matrix K should be equal to N1!" << endl;
@@ -450,45 +456,46 @@ __host__ void PCMM_Scheme::PCMM_Boot(float* plain_mat, Ciphertext& rlwe_cipher, 
 
     encodingMatrix.EvalSlotsToCoeffs(encodingMatrix.m_U0PreFFT, rlwe_cipher);
 
-    rlweCipherDecompose(rlwe_cipher, mlwe_cipher_buffer);
+    rlweCipherDecompose(rlwe_cipher, mlwe_cipher_buffer, mlwe_cipher_buffer.size(), 0);
 
     // PPMM(plain_mat, mlwe_cipher_buffer, mat_M, mat_N, mat_K);
 
-    mlweCipherPacking(rlwe_cipher, mlwe_cipher_buffer);
+    mlweCipherPacking(rlwe_cipher, mlwe_cipher_buffer, mlwe_cipher_buffer.size(), 0);
 
 
-    // scheme.decrypt_display(scheme_algo.secretkey, cipher, "ctReal after stc ");
-	// Step 1: scale to q0/|m|
-    // q0 / message_ratio = q0 / 4.0 == input.scale
-	// Step 2 : Extend the basis from q to Q
-    bootstrapper.modUpQ0toQL(rlwe_cipher);
+    // // scheme.decrypt_display(scheme_algo.secretkey, cipher, "ctReal after stc ");
+	// // Step 1: scale to q0/|m|
+    // // q0 / message_ratio = q0 / 4.0 == input.scale
+	// // Step 2 : Extend the basis from q to Q
+    // bootstrapper.modUpQ0toQL(rlwe_cipher);
 
-    encodingMatrix.EvalCoeffsToSlots(encodingMatrix.m_U0hatTPreFFT, rlwe_cipher);
+    // encodingMatrix.EvalCoeffsToSlots(encodingMatrix.m_U0hatTPreFFT, rlwe_cipher);
 
-    // real = a-bi
-    scheme.conjugate_23(*bootstrapper.ctReal, rlwe_cipher);
+    // // real = a-bi
+    // scheme.conjugate_23(*bootstrapper.ctReal, rlwe_cipher);
 
 
-    // imag = cipher - real = 2bi
-    scheme.sub(*bootstrapper.ctImag, rlwe_cipher, *bootstrapper.ctReal);
-    // real = real + cipher = 2a
-    scheme.addAndEqual(*bootstrapper.ctReal, rlwe_cipher);
+    // // imag = cipher - real = 2bi
+    // scheme.sub(*bootstrapper.ctImag, rlwe_cipher, *bootstrapper.ctReal);
+    // // real = real + cipher = 2a
+    // scheme.addAndEqual(*bootstrapper.ctReal, rlwe_cipher);
 
-    scheme.divByiAndEqual(*bootstrapper.ctImag);
-    bootstrapper.EvalModAndEqual(*bootstrapper.ctReal);
-    bootstrapper.EvalModAndEqual(*bootstrapper.ctImag);
+    // scheme.divByiAndEqual(*bootstrapper.ctImag);
+    // bootstrapper.EvalModAndEqual(*bootstrapper.ctReal);
+    // bootstrapper.EvalModAndEqual(*bootstrapper.ctImag);
 
-    scheme.multConstAndEqual(*bootstrapper.ctReal, 256./16*16);
-    scheme.multConstAndEqual(*bootstrapper.ctImag, 256./16*16);
+    // scheme.multConstAndEqual(*bootstrapper.ctReal, 256./16*16);
+    // scheme.multConstAndEqual(*bootstrapper.ctImag, 256./16*16);
 
     
-    // // Real part * 2
-    // scheme.addAndEqual(rlwe_cipher, *bootstrapper.ctReal);
-    // // // c1.l -= 4;
-    // bootstrapper.EvalModAndEqual(rlwe_cipher);
+    // // // Real part * 2
+    // // scheme.addAndEqual(rlwe_cipher, *bootstrapper.ctReal);
+    // // // // c1.l -= 4;
+    // // bootstrapper.EvalModAndEqual(rlwe_cipher);
 
-    // scheme.multConstAndEqual(rlwe_cipher, 256./16*16);
+    // // scheme.multConstAndEqual(rlwe_cipher, 256./16*16);
 }
+
 
 
 

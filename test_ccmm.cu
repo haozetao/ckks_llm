@@ -15,7 +15,6 @@ using namespace std;
 #include "src/ckks/include/bootstrapping/Bootstrapper.cuh"
 #include "src/ckks/include/TimeUtils.cuh"
 #include "src/ckks/include/precision.cuh"
-#include "src/ckks/ccmm/CCMM_Scheme.cuh"
 #include "src/ckks/attention/Attention.cuh"
 
 
@@ -140,9 +139,9 @@ float temp = 0;
     }
 
     /****************Verify ccmm *V ******************************/
-    read_matrix_from_file("python/V.txt", mes1, slots);
-    read_matrix_from_file("python/sigma_A_1.txt", mes2, slots);
-    read_matrix_from_file("python/sigma_A_2.txt", mes3, slots);
+    read_matrix_from_file("python/data/V.txt", mes1, slots);
+    read_matrix_from_file("python/data/sigma_A_1.txt", mes2, slots);
+    read_matrix_from_file("python/data/sigma_A_2.txt", mes3, slots);
     /****************end Verify ccmm *V ******************************/
 
     cuDoubleComplex* complex_msg1, *complex_msg2, *complex_msg3;
@@ -200,18 +199,23 @@ float temp = 0;
             context.encode(complex_msg3, plain_m3);
             scheme.encryptMsg(c3, plain_m3);
             cudaEventRecord(start);
+                // cout << "before level " << c1.l << endl;
                 // attention_scheme.CCMM_QK(c1, c2, c3, c4);
+                // cout << "res level " << c3.l << endl;
+                // cout << "res level " << c4.l << endl;
+                // cout << "res scale " << c3.scale << endl;
+                // cout << "res scale " << c4.scale << endl;
                 // attention_scheme.CCMM_QK_splited_heads(cQ,cK,cO,16);
-                // ccmm_scheme.CCMM_QK(c1, c2, c3);
                 // scheme.leftRotateAddSelf_23(c1, 2);
                 
                 attention_scheme.TauAndEqual(c1);
+                cout << "KS_SV = " << attention_scheme.KS_SV << endl;
                 attention_scheme.CCMM_V(c2, c3, c1, c4);
-                // scheme.decrypt_display(sk, c1, "c1 after TauAndEqual");
             cudaEventRecord(end);
             cudaEventSynchronize(end);
             cudaEventElapsedTime(&temp, start, end);
             ccmm_time = min(ccmm_time, temp);
+            cout << "KS_SV = " << attention_scheme.KS_SV << endl;
 
             cudaEventRecord(start);
                 // scheme.rescaleAndEqual(c1);
@@ -302,7 +306,7 @@ float temp = 0;
             cuDoubleComplex *target_res1;
             target_res1 = new cuDoubleComplex[slots];
             Plaintext dec_m1(N, L, target_level, slots, NTL::RR(context.precision));
-            read_matrix_from_file("python/tau_V.txt", target_res1, slots);
+            read_matrix_from_file("python/data/tau_V.txt", target_res1, slots);
             scheme.decryptMsg(dec_m1, sk, c1);
             context.decode(dec_m1, complex_msg_dec);
             vector<cuDoubleComplex> values_computed(slots);
@@ -318,7 +322,7 @@ float temp = 0;
             target_res_ccmmV = new cuDoubleComplex[slots];
             Plaintext dec_ccmmV(N, L, target_level, slots, NTL::RR(context.precision));
             memset(target_res_ccmmV, 0, sizeof(cuDoubleComplex) * slots);
-            read_matrix_from_file("python/mul_V_res.txt", target_res_ccmmV, slots);
+            read_matrix_from_file("python/data/mul_V_res.txt", target_res_ccmmV, slots);
 
             scheme.decryptMsg(dec_ccmmV, sk, c4);
             context.decode(dec_ccmmV, complex_msg_dec);
@@ -328,10 +332,10 @@ float temp = 0;
             cudaMemcpy(values_want.data(), target_res_ccmmV, sizeof(cuDoubleComplex) * slots, cudaMemcpyHostToHost);
             // auto status = GetPrecisionStats(values_computed, values_want);
             status = GetPrecisionStats(values_computed, values_want);
-            for (int i = 0; i < slots; i++){
-                if (abs(values_computed[i].x-values_want[i].x)>0.01)
-                cout << i << ' ';
-            }
+            // for (int i = 0; i < slots; i++){
+            //     if (abs(values_computed[i].x-values_want[i].x)>0.01)
+            //     cout << i << ' ';
+            // }
             cout << endl;
             cout<<status.String();
 

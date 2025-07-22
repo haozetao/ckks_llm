@@ -131,10 +131,6 @@ __host__ void PCMM_Scheme::PPMM(float* plain_mat, vector<MLWECiphertext*> mlwe_c
         cout << "matrix K should be equal to N1!" << endl;
         return;
     }
-    if(mat_N != mlwe_cipher_decomposed.size()){
-        cout << "matrix N should be equal to mlwe number!" << endl;
-        return;
-    }
     int N = scheme.context.N;
     
     int N1 = pcmm_context.N1;
@@ -143,17 +139,17 @@ __host__ void PCMM_Scheme::PPMM(float* plain_mat, vector<MLWECiphertext*> mlwe_c
     int ringpack_q_count = pcmm_context.ringpack_q_count;
     int ringpack_pq_count = pcmm_context.ringpack_pq_count;
 
-    int mlwe_num = mlwe_cipher_decomposed.size();
+    // int mlwe_num = mat_N;
     // if(mlwe_cipher_decomposed.size() != mlwe_rank){
     //     cout << "only support packing k mlwe -> 1 rlwe!" << endl;
     //     return;
     // }
     
-    for(int i = 0; i < mlwe_num; i++){
+    for(int i = 0; i < mat_N; i++){
         // repacking_cipher_pointer[mlwe_rank - i - 1] = mlwe_cipher_decomposed[i]->cipher_device;
         repacking_cipher_pointer[i] = mlwe_cipher_decomposed[i]->cipher_device;
     }
-    cudaMemcpy(repacking_cipher_pointer_device, repacking_cipher_pointer.data(), sizeof(uint64_tt*) * mlwe_num, cudaMemcpyHostToDevice);
+    cudaMemcpy(repacking_cipher_pointer_device, repacking_cipher_pointer.data(), sizeof(uint64_tt*) * mat_N, cudaMemcpyHostToDevice);
 
     long scaler = to_double(mlwe_cipher_decomposed[0]->scale);
     cout<<"scaler: "<<scaler<<endl;
@@ -180,7 +176,7 @@ __host__ void PCMM_Scheme::PPMM(float* plain_mat, vector<MLWECiphertext*> mlwe_c
             pcmm_cuda_core_kernel<32, 32, 32, 128, 4> <<<ppmm_block, ppmm_thread>>>(plain_mat, repacking_cipher_pointer_device, ppmm_output, N1, mlwe_rank, ringpack_q_count, ringpack_p_count, scaler, 
                 context.qiInvVecModql_device + l*(l-1)/2, context.qiInvVecModql_shoup_device + l*(l-1)/2);
                 cout<<"call 1 mat_N = "<<128<<endl;
-        } else if (mat_N = 256){
+        } else if (mat_N == 256){
             // 设置shared_memory 大小
             cudaFuncSetAttribute(&pcmm_cuda_core_kernel<32, 32, 32, 256, 4>, cudaFuncAttributeMaxDynamicSharedMemorySize, SMem_size);
             pcmm_cuda_core_kernel<32, 32, 32, 256, 4> <<<ppmm_block, ppmm_thread>>>(plain_mat, repacking_cipher_pointer_device, ppmm_output, N1, mlwe_rank, ringpack_q_count, ringpack_p_count, scaler, 
@@ -198,6 +194,12 @@ __host__ void PCMM_Scheme::PPMM(float* plain_mat, vector<MLWECiphertext*> mlwe_c
             pcmm_cuda_core_kernel<32, 32, 32, 768, 4> <<<ppmm_block, ppmm_thread>>>(plain_mat, repacking_cipher_pointer_device, ppmm_output, N1, mlwe_rank, ringpack_q_count, ringpack_p_count, scaler, 
                 context.qiInvVecModql_device + l*(l-1)/2, context.qiInvVecModql_shoup_device + l*(l-1)/2);
                 cout<<"call 1 mat_N = "<<768<<endl;
+        } else if (mat_N == 3072){
+            // 设置shared_memory 大小
+            cudaFuncSetAttribute(&pcmm_cuda_core_kernel<32, 32, 32, 3072, 4>, cudaFuncAttributeMaxDynamicSharedMemorySize, SMem_size);
+            pcmm_cuda_core_kernel<32, 32, 32, 3072, 4> <<<ppmm_block, ppmm_thread>>>(plain_mat, repacking_cipher_pointer_device, ppmm_output, N1, mlwe_rank, ringpack_q_count, ringpack_p_count, scaler, 
+                context.qiInvVecModql_device + l*(l-1)/2, context.qiInvVecModql_shoup_device + l*(l-1)/2);
+                cout<<"call 1 mat_N = "<<3072<<endl;
         }
     } else {
         cout << "tile size should be equal to 32!" << endl;
@@ -206,7 +208,7 @@ __host__ void PCMM_Scheme::PPMM(float* plain_mat, vector<MLWECiphertext*> mlwe_c
 
     printf("pcmm_block(%d, %d)\n", mat_M / TILE_WIDTH_M, mat_K * (mlwe_rank + 1) / TILE_WIDTH_K);
 
-    for(int i = 0; i < mlwe_num; i++){
+    for(int i = 0; i < mat_M; i++){
         mlwe_cipher_decomposed[i]->scale = mlwe_cipher_decomposed[i]->scale * scaler / pcmm_context.q_ringpack[1];
         cudaMemcpyAsync(mlwe_cipher_decomposed[i]->cipher_device, ppmm_output + i * N1 * (mlwe_rank+1) * 2, sizeof(uint64_tt) * N1 * (mlwe_rank+1), cudaMemcpyDeviceToDevice);
     }

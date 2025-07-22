@@ -13,7 +13,6 @@ public:
     
     Attention(Context_23& context, Scheme_23& scheme, SchemeAlgo& scheme_algo, int token_len, int head_num, int d);
 
-    
     vector<double> exp_cheby_coeffs;
     vector<Chebyshev_Polynomial*> exp_cheby_poly_pool;
     
@@ -58,14 +57,21 @@ public:
     // eval 1/\sqrt(x)
     vector<double> K_sqrt_inv;
     void evalSqrtInv(Ciphertext& cipher, SecretKey& sk, double upper_bound = 1.0);
+    void evalSqrtInv_without_mul_tt(Ciphertext& cipher, SecretKey& sk, double upper_bound = 1.0);
 
     // SoftMax function: exp(x_i) / sum(exp(x_j))
     void evalSoftMax(vector<Ciphertext*>& cipher_P);
+    void evalSoftMax_phase1(vector<Ciphertext*>& cipher_P);
+    void evalSoftMax_phase2(vector<Ciphertext*>& cipher_P);
+
 
     // Layer Normalization: normalize each row of the matrix
-    void LayerNorm(Ciphertext& cipher);
+    void LayerNorm(vector<Ciphertext*>& cipher, SecretKey& sk);
+    void LayerNorm_Bert(vector<Ciphertext*>& cipher, SecretKey& sk);
+
 
     vector<Ciphertext*> nonlieanr_buffer;
+    double need_rescale = 3.169126244751348e+28;
 
     /********************************CCMM for Multi-head Attention*******************************/
 
@@ -85,4 +91,8 @@ public:
     void CCMM_QK_splited_heads(vector<Ciphertext *>& Q, vector<Ciphertext *>& K,vector<Ciphertext *>& O, int column_each_head);
     void TauAndEqual(Ciphertext& A);
     void CCMM_V(Ciphertext& sigma_O1, Ciphertext& sigma_O2, Ciphertext& tau_V, Ciphertext& O);
+    void leftRotateAndEqual_23(Ciphertext& A, int shift);
+    void leftRotateAddSelf_23(Ciphertext& A, int shift);
+    void multAndEqual_23(Ciphertext& A, Ciphertext& B);
+    int KS_SV= 0;
 };

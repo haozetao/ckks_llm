@@ -62,5 +62,6 @@
         "thread": "cpp",
         "typeinfo": "cpp",
         "semaphore": "cpp"
-    }
+    },
+    "C_Cpp.errorSquiggles": "disabled"
 }
