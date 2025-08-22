@@ -52,12 +52,11 @@ public:
 		high = 0;
 	}
 	
-	__host__ __device__ __forceinline__ uint128_tt operator<<(const uint32_tt& shift)
+	__host__ __device__ __forceinline__ uint128_tt operator<<(const int& shift)
 	{
 		uint128_tt z;
-		if(shift < 64){
-			z.high = high << shift;
-			z.high = (low >> (64 - shift)) | z.high;
+		if (shift < 64) {
+			z.high = (high << shift) | (low >> (64 - shift));
 			z.low = low << shift;
 			return z;
 		} else if (shift == 64){
@@ -71,16 +70,16 @@ public:
 		}
 	}
 
-	__host__ __device__ __forceinline__ uint128_tt operator>>(const uint32_tt& shift)
-	{
-		uint128_tt z;
+	// __host__ __device__ __forceinline__ uint128_tt operator>>(const int& shift)
+	// {
+	// 	uint128_tt z;
 
-		z.low = low >> shift;
-		z.low = (high << (64 - shift)) | z.low;
-		z.high = high >> shift;
+	// 	z.low = low >> shift;
+	// 	z.low = (high << (64 - shift)) | z.low;
+	// 	z.high = high >> shift;
 
-		return z;
-	}
+	// 	return z;
+	// }
 };
 
 // __host__ __device__ __forceinline__ uint128_tt operator+(const uint128_tt& x, const uint128_tt& y)
