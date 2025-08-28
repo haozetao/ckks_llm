@@ -123,7 +123,7 @@ int main(int argc, char* argv[])
             enc = min(ecd, temp);
         
             cuTimer.start();
-                pcmm_scheme.rlweCipherDecompose(c1, mlwe_cipher_decomposed);
+                pcmm_scheme.rlweCipherDecompose(c1, mlwe_cipher_decomposed, decomp_num, 0);
             temp = cuTimer.stop();
             rlwe2mlwe = min(rlwe2mlwe, temp);
 
@@ -156,7 +156,7 @@ int main(int argc, char* argv[])
             ppmm_time = min(ppmm_time, temp);
 
             cuTimer.start();
-                pcmm_scheme.mlweCipherPacking(c2, mlwe_cipher_decomposed);
+                pcmm_scheme.mlweCipherPacking(c2, mlwe_cipher_decomposed, decomp_num, 0);
             temp = cuTimer.stop();
             mlwe2rlwe = min(mlwe2rlwe, temp);
 

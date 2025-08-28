@@ -109,7 +109,7 @@ __global__ void decode_coeffs_kernel(uint64_tt* in, double* vals, int p_num, lon
 
 using ZZ = NTL::ZZ;
 using RR = NTL::RR;
-__host__ void Context_23::decode_coeffs(Plaintext& msg, double* vals)
+__host__ void Context_23::decode_coeffs(Plaintext& msg, double* vals, bool is_bitRev)
 {
 	long slots = msg.slots;
 	int gap = Nh / slots;
@@ -160,12 +160,28 @@ __host__ void Context_23::decode_coeffs(Plaintext& msg, double* vals)
     ZZ c;
     ZZ ci;
 	vector<double> v(N);
-    for (long idx = 0; idx < N; idx++)
+    // for (long idx = 0; idx < N; idx++)
+	// {
+    //     c = coeffsBigint[idx]<= Q_half ? coeffsBigint[idx] : coeffsBigint[idx] - Q_modules;
+    //     v[idx] = to_double(NTL::conv<RR>(c)/msg.scale);
+    // }
+	for (long j = 0, jdx = Nh, idx = 0; j < slots; j++, jdx += gap, idx += gap)
 	{
-        c = coeffsBigint[idx]<= Q_half ? coeffsBigint[idx] : coeffsBigint[idx] - Q_modules;
-        v[idx] = to_double(NTL::conv<RR>(c)/msg.scale);
+        c = coeffsBigint[idx]<= Q_half ? coeffsBigint[idx] : coeffsBigint[idx] -  Q_modules;
+        ci = coeffsBigint[jdx]<= Q_half ? coeffsBigint[jdx] : coeffsBigint[jdx] -  Q_modules;
+
+		if(is_bitRev){
+			v[bitReverse(idx, log2(slots))] = to_double(NTL::conv<RR>(c)/msg.scale);
+			v[bitReverse(idx, log2(slots)) + Nh] = to_double(NTL::conv<RR>(ci)/msg.scale);
+		} else 
+		{
+			v[idx] = to_double(NTL::conv<RR>(c)/msg.scale);
+			v[jdx] = to_double(NTL::conv<RR>(ci)/msg.scale);
+		}
     }
-	// cout<<endl<<endl;
+	if(is_bitRev){
+		cout<<"decode coeffs with bitrev"<<endl;
+	}
 	cudaMemcpy(vals, v.data(), sizeof(double) * N, cudaMemcpyHostToDevice);
 }
 

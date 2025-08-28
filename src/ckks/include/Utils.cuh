@@ -152,13 +152,13 @@ void randomComplexArray(cuDoubleComplex* ComplexArray, long slots, double lower 
 	}
 }
 
-void randomDoubleArray(double* doubleArray, long num, double lower_bound = -1.0, double upper_bound = 1.0)
+void randomDoubleArray(double* doubleArray, long num, double bound = 1.0)
 {
-    std::uniform_real_distribution<double> randnum(lower_bound, upper_bound);
+    std::uniform_real_distribution<double> randnum(0, bound);
 
 	for (long i = 0; i < num; ++i) {
-		doubleArray[i] = randnum(rng);
-		// doubleArray[i] = (i%256)/10000.;
+		// doubleArray[i] = randnum(rng);
+		doubleArray[i] = (i%256)/10000.;
 
 	}
 }

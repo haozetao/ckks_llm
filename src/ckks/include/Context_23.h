@@ -29,7 +29,7 @@ class Context_23{
 	__host__ void encode(cuDoubleComplex* vals, Plaintext& msg);
 	__host__ void decode(Plaintext& msg, cuDoubleComplex* vals);
 	__host__ void encode_coeffs(double* vals, Plaintext& msg);
-	__host__ void decode_coeffs(Plaintext& msg, double* vals);
+	__host__ void decode_coeffs(Plaintext& msg, double* vals, bool is_bitRev = false);
 
 
 	__host__ void PolyToBigintLvl(int level, uint64_tt* p1, int gap, std::vector<NTL::ZZ>& coeffsBigint);

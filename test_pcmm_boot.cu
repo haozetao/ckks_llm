@@ -128,25 +128,28 @@ int main(int argc, char* argv[])
 
             cuTimer.start();
                 c2 = c1;
-                // scheme.mulByiAndEqual(c2);
-                // scheme.addConstAndEqual(c1, 0.1);
-                // scheme.addAndEqual(c2, c1);
+                scheme.mulByiAndEqual(c2);
+                scheme.addConstAndEqual(c1, 0.1);
+                scheme.addAndEqual(c2, c1);
             temp = cuTimer.stop();
             conj_time = min(conj_time, temp);
             
             scheme.decrypt_display(sk, c2, "before s2c");
 
-            pcmm_scheme.PCMM_Boot(plain_mat_device, c2, mlwe_cipher_decomposed, mat_M, mat_N, PCMM_N1);
+            // pcmm_scheme.PCMM_Boot(plain_mat_device, c2, mlwe_cipher_decomposed, mat_M, mat_N, PCMM_N1);
+            encodingMatrix.EvalSlotsToCoeffs(encodingMatrix.m_U0PreFFT, c2);
 
+            // scheme.decrypt_display(sk, c2, "dec c2");
 
             // scheme.decrypt_display(sk, *bootstrapper.ctReal, "dec real");
 
             // scheme.decrypt_display(sk, *bootstrapper.ctImag, "dec imag");
 
             scheme.decryptMsg(m2_dec, sk, c2);
-            // // context.decode(m2_dec, dec_message);
-            context.decode_coeffs(m2_dec, real_msg_dec);
-            print_device_array(real_msg_dec, N, "repacking decrypt");
+            // context.decode(m2_dec, dec_message);
+            context.decode_coeffs(m2_dec, real_msg_dec, true);
+            print_device_array(real_msg_dec        , slots, "repacking decrypt1");
+            print_device_array(real_msg_dec + slots, slots, "repacking decrypt2");
         }
 
 
