@@ -80,9 +80,23 @@ int main(int argc, char* argv[])
 
     int mat_M = mlwe_rank, mat_N = mlwe_rank;
     float* plain_mat_host = new float[mat_M * mat_N];
+    std::uniform_real_distribution<float> randnum(-1./10, 1./10);
     for(int i = 0; i < mat_M * mat_N; i++){
-        plain_mat_host[i] = (float)(i % PCMM_N1) / 10000;
+        plain_mat_host[i] = randnum(rng);
     }
+
+    double* plain_gemm_host = new double[N];
+    memset(plain_gemm_host, 0, sizeof(double) * N);
+    
+    printf("mat_M: %d, mat_N: %d, mat_K: %d\n", mat_M, mat_N, PCMM_N1);
+    for(int idx_M = 0; idx_M < mat_M; idx_M++){
+        for(int idx_K = 0; idx_K < PCMM_N1; idx_K++){
+            for(int idx_N = 0; idx_N < mat_N; idx_N++){
+                plain_gemm_host[idx_M + idx_K*mat_M] += plain_mat_host[idx_N + idx_M*mat_N] * real_mes_host[idx_N + idx_K*mat_N];
+            }
+        }
+    }
+
     float* plain_mat_device;
     cudaMalloc(&plain_mat_device, sizeof(float) * mat_M * mat_N);
     cudaMemcpy(plain_mat_device, plain_mat_host, sizeof(float) * mat_M * mat_N, cudaMemcpyHostToDevice);
@@ -115,7 +129,7 @@ int main(int argc, char* argv[])
         temp = cuTimer.stop();
         ecd = min(ecd, temp);
 
-        for(int i = 0; i < 10; i++)
+        for(int i = 0; i < 1; i++)
         {
             cuTimer.start();
                 scheme.encryptMsg(c1, plain_m1_coeffs_encode);
@@ -167,14 +181,19 @@ int main(int argc, char* argv[])
         }
 
         
-        // vector<double> real_values_computed(N);
-        // cudaMemcpy(real_values_computed.data(), real_msg_dec, sizeof(double) * N, cudaMemcpyDeviceToHost);
+        vector<double> real_values_computed(N);
+        cudaMemcpy(real_values_computed.data(), real_msg_dec, sizeof(double) * N, cudaMemcpyDeviceToHost);
 
-        // vector<double> real_values_want(N);
+        vector<double> real_values_want(N);
         // cudaMemcpy(real_values_want.data(), real_msg1, sizeof(double) * N, cudaMemcpyDeviceToHost);
+        memcpy(real_values_want.data(), plain_gemm_host, sizeof(double) * N);
 
-        // auto status_real = GetPrecisionStats(real_values_computed, real_values_want);
-        // cout<<status_real.String();
+        for(int i = 0; i < 8; i++){
+            printf("%.8lf, ", plain_gemm_host[i]);
+        }
+        cout<<endl;
+        auto status_real = GetPrecisionStats(real_values_computed, real_values_want);
+        cout<<status_real.String();
 
         
         // vector<double> mlwe_values_computed(PCMM_N1);

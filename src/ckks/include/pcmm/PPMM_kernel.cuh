@@ -18,8 +18,6 @@ __forceinline__ __device__ void ppmm_16x16(int64_tt* mat_A_16x16, uint64_tt* mat
         int line_idx = thread_idx / 16 + i * 2;
         int idx_in_line = thread_idx % 16;
 
-        uint128_tt acc = mat_acc_16x16[i];
-
     #pragma unroll
         for(int iter = 0; iter < 16; iter++){
             long temp = mat_A_16x16[line_idx*16 + iter];
@@ -27,9 +25,8 @@ __forceinline__ __device__ void ppmm_16x16(int64_tt* mat_A_16x16, uint64_tt* mat
             uint64_tt a = temp > 0 ? temp : mod + temp;
             uint64_tt b = mat_B_16x16[iter*16 + idx_in_line];
 
-            madc_uint64_uint64_uint128(a, b, acc);
+            madc_uint64_uint64_uint128(a, b, mat_acc_16x16[i]);
         }
-        mat_acc_16x16[i] = acc;
     }
 }
 
@@ -121,7 +118,7 @@ __global__ void pcmm_cuda_core_kernel(float* plain_mat, uint64_tt** mlwe_cipher_
             auto block = this_thread_block();
             // 创建一个 pipeline state，用于 double buffering
             // 每个 block 使用一个 pipeline
-            __shared__ cuda::pipeline_shared_state<cuda::thread_scope::thread_scope_block, 4> shared_state;
+            __shared__ cuda::pipeline_shared_state<cuda::thread_scope::thread_scope_block, 2> shared_state;
             auto pipeline = cuda::make_pipeline(block, &shared_state);
     {
         for(int idx_mod = mod_num - 1; idx_mod >= 0; idx_mod--)
@@ -310,7 +307,7 @@ __host__ void PCMM_Scheme::PPMM(float* plain_mat, vector<MLWECiphertext*> mlwe_c
             pcmm_cuda_core_kernel<128> <<<ppmm_block, ppmm_thread, SMem_size>>>(plain_mat, repacking_cipher_pointer_device, ppmm_output, N1, mlwe_rank, ringpack_q_count, ringpack_p_count, scaler, 
                 context.qiInvVecModql_device + l*(l-1)/2, context.qiInvVecModql_shoup_device + l*(l-1)/2);
                 cout<<"call 1 mat_N = "<<128<<endl;
-        } else if (mat_N = 256){
+        } else if (mat_N == 256){
             // 设置shared_memory 大小
             cudaFuncSetAttribute(&pcmm_cuda_core_kernel<256>, cudaFuncAttributeMaxDynamicSharedMemorySize, SMem_size);
             pcmm_cuda_core_kernel<256> <<<ppmm_block, ppmm_thread, SMem_size>>>(plain_mat, repacking_cipher_pointer_device, ppmm_output, N1, mlwe_rank, ringpack_q_count, ringpack_p_count, scaler, 
