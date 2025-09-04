@@ -47,7 +47,7 @@ int main(int argc, char* argv[])
         bootstrapper.addBootstrappingKey(sk);
 
     PCMM_Context pcmm_context(PCMM_N1, mlwe_rank, p_ringpack, q_ringpack, context);
-    PCMM_Scheme pcmm_scheme(pcmm_context, scheme, bootstrapper);
+    PCMM_Scheme pcmm_scheme(pcmm_context, scheme, bootstrapper, sk);
 
     int pq_ringpack_count = pcmm_context.pq_ringpack.size();
 
@@ -57,7 +57,12 @@ int main(int argc, char* argv[])
     pcmm_scheme.addRepakcingKey(mlwe_sk, sk);
     
     cuDoubleComplex* message_host = new cuDoubleComplex[slots];
+    double* message_host_real = new double[N];
     randomComplexArray(message_host, slots, -1./10, 1./10);
+    for(int i = 0; i < slots; i++){
+        message_host_real[2*i] = message_host[i].x;
+        message_host_real[2*i + 1] = message_host[i].y;
+    }
     for(int i = 0; i < 8; i++){
         printf("%lf, ", message_host[i]);
     }
@@ -66,7 +71,7 @@ int main(int argc, char* argv[])
     cuDoubleComplex* message_device, *dec_message;
     cudaMalloc(&message_device, sizeof(cuDoubleComplex) * slots);
     cudaMalloc(&dec_message, sizeof(cuDoubleComplex) * slots);
-	cudaMemcpy(message_device, message_host, sizeof(double) * slots, cudaMemcpyHostToDevice);
+	cudaMemcpy(message_device, message_host, sizeof(cuDoubleComplex) * slots, cudaMemcpyHostToDevice);
     print_device_array(message_device, slots, "message");
     
     CUDATimer cuTimer;
@@ -78,19 +83,29 @@ int main(int argc, char* argv[])
     float temp = 0;
     int target_level = 1 + s2c_level_cost;
 
-    int mat_M = 256, mat_N = 128;
+    int mat_M = mlwe_rank, mat_N = mlwe_rank;
     float* plain_mat_host = new float[mat_M * mat_N];
-    randomFloatArray(plain_mat_host, mat_M * mat_N, 1.0);
-    // for(int i = 0; i < mat_M * mat_N; i++){
-    //     plain_mat_host[i] = (float)(i % 256) * pow(-1, i) / 10000;
-    // }
+    randomFloatArray(plain_mat_host, mat_M * mat_N, 0.1);
+
+    double* plain_gemm_host = new double[N];
+    memset(plain_gemm_host, 0, sizeof(double) * N);
+    
+    printf("mat_M: %d, mat_N: %d, mat_K: %d\n", mat_M, mat_N, PCMM_N1);
+    for(int idx_M = 0; idx_M < mat_M; idx_M++){
+        for(int idx_K = 0; idx_K < PCMM_N1; idx_K++){
+            for(int idx_N = 0; idx_N < mat_N; idx_N++){
+                plain_gemm_host[idx_M + idx_K*mat_M] += plain_mat_host[idx_N + idx_M*mat_N] * message_host_real[idx_N + idx_K*mat_N];
+            }
+        }
+    }
+
     float* plain_mat_device;
     cudaMalloc(&plain_mat_device, sizeof(float) * mat_M * mat_N);
     cudaMemcpy(plain_mat_device, plain_mat_host, sizeof(float) * mat_M * mat_N, cudaMemcpyHostToDevice);
 
     // for(target_level; target_level >= 0; target_level--)
     {
-        int decomp_num = mlwe_rank / 2;
+        int decomp_num = mlwe_rank;
 
         vector<MLWECiphertext*> mlwe_cipher_decomposed;
         for(int i = 0; i < decomp_num; i++){
@@ -128,29 +143,59 @@ int main(int argc, char* argv[])
 
             cuTimer.start();
                 c2 = c1;
-                scheme.mulByiAndEqual(c2);
-                scheme.addConstAndEqual(c1, 0.1);
-                scheme.addAndEqual(c2, c1);
+                // scheme.mulByiAndEqual(c2);
+                // scheme.addConstAndEqual(c1, 0.1);
+                // scheme.addAndEqual(c2, c1);
             temp = cuTimer.stop();
             conj_time = min(conj_time, temp);
             
-            scheme.decrypt_display(sk, c2, "before s2c");
+            pcmm_scheme.PCMM_Boot(plain_mat_device, c2, mlwe_cipher_decomposed, mat_M, mat_N, PCMM_N1);
+            // encodingMatrix.EvalSlotsToCoeffs(encodingMatrix.m_U0PreFFT, c2);
 
-            // pcmm_scheme.PCMM_Boot(plain_mat_device, c2, mlwe_cipher_decomposed, mat_M, mat_N, PCMM_N1);
-            encodingMatrix.EvalSlotsToCoeffs(encodingMatrix.m_U0PreFFT, c2);
-
-            // scheme.decrypt_display(sk, c2, "dec c2");
+            // // scheme.decrypt_display(sk, c2, "dec c2");
 
             // scheme.decrypt_display(sk, *bootstrapper.ctReal, "dec real");
 
             // scheme.decrypt_display(sk, *bootstrapper.ctImag, "dec imag");
 
-            scheme.decryptMsg(m2_dec, sk, c2);
-            // context.decode(m2_dec, dec_message);
-            context.decode_coeffs(m2_dec, real_msg_dec, true);
-            print_device_array(real_msg_dec        , slots, "repacking decrypt1");
-            print_device_array(real_msg_dec + slots, slots, "repacking decrypt2");
+
+            // scheme.conjugateAndEqual_23(*bootstrapper.ctImag);
+            scheme.mulByiAndEqual(*bootstrapper.ctImag);
+            c1 = *bootstrapper.ctReal;
+            scheme.addAndEqual(c1, *bootstrapper.ctImag);
+            
+            // c1 = c2;
+
+            scheme.decryptMsg(m1_dec, sk, c1);
+            context.decode(m1_dec, dec_message);
+            print_device_array(dec_message, slots, "dec_message");
+            // context.decode_coeffs(m1_dec, real_msg_dec, true);
+            // print_device_array(real_msg_dec        , slots, "repacking decrypt1");
+            // print_device_array(real_msg_dec + slots, slots, "repacking decrypt2");
         }
+        printf("=========target ppmm output==========\n");
+        for(int i = 0; i < 8; i++){
+            printf("%lf, ", plain_gemm_host[i]);
+        }
+        cout<<endl;
+        for(int i = 0; i < 8; i++){
+            printf("%lf, ", plain_gemm_host[i + slots]);
+        }
+        printf("\n=====================================\n");
+
+        vector<cuDoubleComplex> real_values_computed(slots);
+        cudaMemcpy(real_values_computed.data(), dec_message, sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);
+
+        vector<cuDoubleComplex> real_values_want(slots);
+        // memcpy(real_values_want.data(), plain_gemm_host, sizeof(double) * N);
+        for(int i = 0; i < slots; i++){
+            real_values_want[i].x = plain_gemm_host[2*i];
+            real_values_want[i].y = plain_gemm_host[2*i + 1];
+        }
+
+        cout<<endl;
+        auto status_real = GetPrecisionStats(real_values_computed, real_values_want);
+        cout<<status_real.String();
 
 
         printf("Time: encode: %f us decode: %f us\n", ecd*1000, dcd*1000);

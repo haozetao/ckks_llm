@@ -15,7 +15,8 @@ public:
     Scheme_23& scheme;
     Context_23& context;
     Bootstrapper& bootstrapper;
-    PCMM_Scheme(PCMM_Context& pcmm_context, Scheme_23& scheme, Bootstrapper& bootstrapper);
+    SecretKey& sk;
+    PCMM_Scheme(PCMM_Context& pcmm_context, Scheme_23& scheme, Bootstrapper& bootstrapper, SecretKey& sk);
 
     uint64_tt* embeded_mlwe_buffer;
     vector<Key*> repackingKeys;
@@ -24,6 +25,7 @@ public:
     uint64_tt** repacking_cipher_pointer_device;
 
     uint64_tt* ppmm_output;
+    Plaintext* plain;
 
 
     __host__ void convertMLWESKfromRLWESK(MLWESecretKey& mlwe_sk, SecretKey& rlwe_sk);
@@ -39,6 +41,8 @@ public:
     __host__ void mlweCipherPacking(Ciphertext& rlwe_cipher, vector<MLWECiphertext*> mlwe_cipher_decomposed, uint64_tt mlwe_num, uint64_tt offset);
 
     __host__ void PPMM(float* plain_mat, vector<MLWECiphertext*> mlwe_cipher_decomposed, int mat_M, int mat_N, int mat_K);
+
+    __host__ void coeffBitRev(Ciphertext& rlwe_cipher);
 
     __host__ void PCMM_Boot(float* plain_mat, Ciphertext& rlwe_cipher, vector<MLWECiphertext*>& mlwe_cipher_decomposed, int mat_M, int mat_N, int mat_K);
 };

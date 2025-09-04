@@ -330,6 +330,7 @@ float temp = 0;
             cudaMemcpy(values_computed.data(), complex_msg_dec, sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);
             // vector<cuDoubleComplex> values_want(slots);
             cudaMemcpy(values_want.data(), target_res_ccmmV, sizeof(cuDoubleComplex) * slots, cudaMemcpyHostToHost);
+
             // auto status = GetPrecisionStats(values_computed, values_want);
             status = GetPrecisionStats(values_computed, values_want);
             // for (int i = 0; i < slots; i++){

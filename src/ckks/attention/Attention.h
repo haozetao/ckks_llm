@@ -28,6 +28,9 @@ public:
     double softmax_x_max;
     double activate_x_max;
 
+    int mulV_gs = 16;
+    int mulV_bs = 8;
+
     vector<Plaintext*> column_mask_reduce;
     vector<Plaintext*> column_mask_ccmm;
     void prepareMask(cuDoubleComplex* mask_host, vector<int> idx_vector);
@@ -86,6 +89,7 @@ public:
     vector<Plaintext> plain_tau_diag = vector<Plaintext>(64);
     vector<Plaintext> mask_ccmm_left = vector<Plaintext>(64);
     vector<Plaintext> mask_ccmm_right = vector<Plaintext>(64);
+    vector<Ciphertext*> mulV_gs_res = vector<Ciphertext*>(mulV_gs);
     void CCMM_QK(Ciphertext& Q, Ciphertext& K, Ciphertext& O1, Ciphertext& O2);
     void Recursive_CCMM_reduce(Ciphertext& Q, Ciphertext& K, int layer, int max_layer, int seq, int column_num, Ciphertext** tmpcipher_buffer);
     void CCMM_QK_splited_heads(vector<Ciphertext *>& Q, vector<Ciphertext *>& K,vector<Ciphertext *>& O, int column_each_head);

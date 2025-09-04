@@ -47,7 +47,7 @@ int main(int argc, char* argv[])
 
 
     PCMM_Context pcmm_context(PCMM_N1, mlwe_rank, p_ringpack, q_ringpack, context);
-    PCMM_Scheme pcmm_scheme(pcmm_context, scheme, boostrapper);
+    PCMM_Scheme pcmm_scheme(pcmm_context, scheme, boostrapper, sk);
 
     int pq_ringpack_count = pcmm_context.pq_ringpack.size();
 

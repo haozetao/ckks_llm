@@ -171,8 +171,8 @@ __host__ void Context_23::decode_coeffs(Plaintext& msg, double* vals, bool is_bi
         ci = coeffsBigint[jdx]<= Q_half ? coeffsBigint[jdx] : coeffsBigint[jdx] -  Q_modules;
 
 		if(is_bitRev){
-			v[bitReverse(idx, log2(slots))] = to_double(NTL::conv<RR>(c)/msg.scale);
-			v[bitReverse(idx, log2(slots)) + Nh] = to_double(NTL::conv<RR>(ci)/msg.scale);
+			v[bitReverse(idx, log2(N))] = to_double(NTL::conv<RR>(c)/msg.scale) * 256;
+			v[bitReverse(jdx, log2(N))] = to_double(NTL::conv<RR>(ci)/msg.scale) * 256;
 		} else 
 		{
 			v[idx] = to_double(NTL::conv<RR>(c)/msg.scale);

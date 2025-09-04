@@ -166,6 +166,7 @@ Attention::Attention(Context_23& context, Scheme_23& scheme, SchemeAlgo& scheme_
     leafnode = scheme_algo.chebyshev_tree_pool[log2(d)+1];
     tmp_shift_K = scheme_algo.chebyshev_tree_pool[log2(d)+2];
     cout << "d=" << d << endl;
+    cout << "scheme_algo.chebyshev_tree_pool.size() = " << scheme_algo.chebyshev_tree_pool.size() << endl;
 
     /****************************** begin *V ***********************************/
     rot_diag = new cuDoubleComplex[slots];
@@ -215,6 +216,10 @@ Attention::Attention(Context_23& context, Scheme_23& scheme, SchemeAlgo& scheme_
         context.encode(column_mask_buffer_device, mask_ccmm_right[mask_column_num]);
     }
 
+    for (int i = 0; i < mulV_gs; i++){
+        mulV_gs_res[i] = scheme_algo.chebyshev_tree_pool[i];
+    }
+
     /****************************** end *V ***********************************/
 }
 
@@ -261,9 +266,16 @@ void Attention::addKey(SecretKey& sk)
         printf("%d, ", 256*i);
     }
     // for *V
-    scheme.addLeftRotKey_23(sk, 32768-64+1);
+    scheme.addLeftRotKey_23(sk, 32768-255);
         printf("%d, ", 32768-64+1);
     cout<<endl;
+    scheme.addLeftRotKey_23(sk, 32768-64);
+        printf("%d, ", 32768-64+1);
+    cout<<endl;
+    for(int i = 0; i < mulV_bs; i++){
+        scheme.addLeftRotKey_23(sk, 256*i);
+        printf("%d, ", 256*i);
+    }
 }
 
 
@@ -946,75 +958,82 @@ void Attention::TauAndEqual(Ciphertext& A)
 void Attention::CCMM_V(Ciphertext& sigma_O1, Ciphertext& sigma_O2, Ciphertext& tau_V, Ciphertext& O){
     int slots = context.slots;
     int column_num = slots / token_len;
-    Ciphertext* mul_mat1 = scheme_algo.chebyshev_tree_pool[0];
-    Ciphertext* mul_mat2 = scheme_algo.chebyshev_tree_pool[1];
-    Ciphertext* rot_tau_V = scheme_algo.chebyshev_tree_pool[2];
-    Ciphertext* rot_O1 = scheme_algo.chebyshev_tree_pool[3];
-    Ciphertext* rot_O2 = scheme_algo.chebyshev_tree_pool[4];
-    *rot_tau_V = tau_V;
+    Ciphertext* mat1 = scheme_algo.chebyshev_tree_pool[mulV_gs];
+    Ciphertext* mat2 = scheme_algo.chebyshev_tree_pool[mulV_gs + 1];
+    Ciphertext* mat3 = scheme_algo.chebyshev_tree_pool[mulV_gs + 2];
+    Ciphertext* mat4 = scheme_algo.chebyshev_tree_pool[mulV_gs + 3];
+    Ciphertext* temp_rot1 = scheme_algo.chebyshev_tree_pool[mulV_gs + 4];
+    Ciphertext* temp_rot2 = scheme_algo.chebyshev_tree_pool[mulV_gs + 5];
+    Ciphertext* temp_mul1 = scheme_algo.chebyshev_tree_pool[mulV_gs + 6];
+    Ciphertext* temp_mul2 = scheme_algo.chebyshev_tree_pool[mulV_gs + 7];
+    Ciphertext* temp_res = scheme_algo.chebyshev_tree_pool[mulV_gs + 8];
 
-    *rot_O1 = sigma_O1;
-    *rot_O2 = sigma_O2;
-    for (int i = 0; i < d; i++){
-        if (i == 0){
-            O = *rot_O1;
-            multAndEqual_23(O, *rot_tau_V);
-            scheme.rescaleAndEqual(O);
-        }
-        else{
-            leftRotateAndEqual_23(*rot_tau_V, column_num);
-            leftRotateAndEqual_23(*rot_O1, 1);
-            *mul_mat1 = *rot_O1;
-            scheme.multConstAndEqual(*mul_mat1, mask_ccmm_left[i]);
-            scheme.rescaleAndEqual(*mul_mat1);
-
-            if (i == 1){
-                leftRotateAndEqual_23(*rot_O2, slots - d + 1);
-            }
-            else{
-                leftRotateAndEqual_23(*rot_O2, 1);
-            }
-            *mul_mat2 = *rot_O2;
-            scheme.multConstAndEqual(*mul_mat2, mask_ccmm_right[i]);
-            scheme.rescaleAndEqual(*mul_mat2);
-
-            scheme.addAndEqual(*mul_mat1, *mul_mat2);
-            multAndEqual_23(*mul_mat1, *rot_tau_V);
-            scheme.rescaleAndEqual(*mul_mat1);
-            scheme.addAndEqual(O, *mul_mat1);
-        }
+    // gs
+    *(mulV_gs_res[0]) = tau_V;
+    for (int j = 1; j < mulV_gs; j++){
+        *mulV_gs_res[j] = *mulV_gs_res[j-1];
+        leftRotateAndEqual_23(*mulV_gs_res[j], mulV_bs*column_num);
     }
-    *rot_O1 = sigma_O2;
-    *rot_O2 = sigma_O1;
-    for (int i = 0; i < d; i++){
+
+    *temp_rot1 = sigma_O1;
+    *temp_rot2 = sigma_O2;
+    // bs
+    int offset = 0;
+    for (int i = 0; i < mulV_bs; i++){
+        if (i > 0){
+            leftRotateAndEqual_23(*temp_rot1, 32768-255);
+            leftRotateAndEqual_23(*temp_rot2, 32768-255);
+        }
+        *mat1 = *temp_rot1;
+        *mat3 = *temp_rot2;
+        for (int j = 0; j < mulV_gs/2; j++){
+            offset = i + j * mulV_bs;
+            if (j > 0){
+                leftRotateAndEqual_23(*mat1, mulV_bs);
+                leftRotateAndEqual_23(*mat3, mulV_bs);
+            }
+            *mat4 = *mat1;
+            leftRotateAndEqual_23(*mat4, 32768-64);
+            *mat2 = *mat3;
+            leftRotateAndEqual_23(*mat2, 32768-64);
+
+            *temp_mul1 = *mat1;
+            *temp_mul2 = *mat2;
+            
+            if (offset){
+                scheme.multConstAndEqual(*temp_mul1, mask_ccmm_left[offset]);
+                scheme.rescaleAndEqual(*temp_mul1);
+                
+                scheme.multConstAndEqual(*temp_mul2, mask_ccmm_right[offset]);
+                scheme.rescaleAndEqual(*temp_mul2);
+                scheme.addAndEqual(*temp_mul1, *temp_mul2);
+            }
+            multAndEqual_23(*temp_mul1, *mulV_gs_res[j]);
+            scheme.rescaleAndEqual(*temp_mul1);
+            if (j==0) *temp_res = *temp_mul1;
+            else scheme.addAndEqual(*temp_res, *temp_mul1);
+
+
+            *temp_mul1 = *mat3;
+            *temp_mul2 = *mat4;
+            if (offset){
+                scheme.multConstAndEqual(*temp_mul1, mask_ccmm_left[offset]);
+                scheme.rescaleAndEqual(*temp_mul1);
+                scheme.multConstAndEqual(*temp_mul2, mask_ccmm_right[offset]);
+                scheme.rescaleAndEqual(*temp_mul2);
+                scheme.addAndEqual(*temp_mul1, *temp_mul2);
+            }
+            multAndEqual_23(*temp_mul1, *mulV_gs_res[j+8]);
+            scheme.rescaleAndEqual(*temp_mul1);
+            scheme.addAndEqual(*temp_res, *temp_mul1);
+            
+        }
         if (i == 0){
-            *mul_mat1 = *rot_O1;
-            leftRotateAndEqual_23(*rot_tau_V, column_num);
-            multAndEqual_23(*mul_mat1, *rot_tau_V);
-            scheme.rescaleAndEqual(*mul_mat1);
-            scheme.addAndEqual(O, *mul_mat1);
+            O = *temp_res;
         }
         else{
-            leftRotateAndEqual_23(*rot_tau_V, column_num);
-            leftRotateAndEqual_23(*rot_O1, 1);
-            *mul_mat1 = *rot_O1;
-            scheme.multConstAndEqual(*mul_mat1, mask_ccmm_left[i]);
-            scheme.rescaleAndEqual(*mul_mat1);
-
-            if (i == 1){
-                leftRotateAndEqual_23(*rot_O2, slots - d + 1);
-            }
-            else{
-                leftRotateAndEqual_23(*rot_O2, 1);
-            }
-            *mul_mat2 = *rot_O2;
-            scheme.multConstAndEqual(*mul_mat2, mask_ccmm_right[i]);
-            scheme.rescaleAndEqual(*mul_mat2);
-
-            scheme.addAndEqual(*mul_mat1, *mul_mat2);
-            multAndEqual_23(*mul_mat1, *rot_tau_V);
-            scheme.rescaleAndEqual(*mul_mat1);
-            scheme.addAndEqual(O, *mul_mat1);
+            leftRotateAndEqual_23(*temp_res, 256*i);
+            scheme.addAndEqual(O, *temp_res);
         }
     }
 }

@@ -5,7 +5,7 @@
 #include "../TimeUtils.cuh"
 
 
-PCMM_Scheme::PCMM_Scheme(PCMM_Context& pcmm_context, Scheme_23& scheme, Bootstrapper& bootstrapper): pcmm_context(pcmm_context), scheme(scheme), context(scheme.context), bootstrapper(bootstrapper)
+PCMM_Scheme::PCMM_Scheme(PCMM_Context& pcmm_context, Scheme_23& scheme, Bootstrapper& bootstrapper, SecretKey& sk): pcmm_context(pcmm_context), scheme(scheme), context(scheme.context), bootstrapper(bootstrapper), sk(sk)
 {
     int N = context.N;
     int N1 = pcmm_context.N1;
@@ -18,6 +18,7 @@ PCMM_Scheme::PCMM_Scheme(PCMM_Context& pcmm_context, Scheme_23& scheme, Bootstra
     cudaMalloc(&repacking_cipher_pointer_device, sizeof(uint64_tt*) * 3072);
 
     cudaMalloc(&ppmm_output, sizeof(uint64_tt) * N1 * (mlwe_rank+1) * 3072 * pcmm_context.ringpack_q_count);
+    plain = new Plaintext(N, context.L, context.L, context.slots, NTL::RR(context.precision));
 }
 
 __host__ void PCMM_Scheme::convertMLWESKfromRLWESK(MLWESecretKey& mlwe_sk, SecretKey& rlwe_sk)
@@ -455,37 +456,39 @@ __host__ void PCMM_Scheme::PCMM_Boot(float* plain_mat, Ciphertext& rlwe_cipher, 
     EncodingMatrix& encodingMatrix = bootstrapper.encodingMatrix;
 
     encodingMatrix.EvalSlotsToCoeffs(encodingMatrix.m_U0PreFFT, rlwe_cipher);
+    
+    coeffBitRev(rlwe_cipher);
+    rlweCipherDecompose(rlwe_cipher, mlwe_cipher_buffer, 256, 0);
 
-    rlweCipherDecompose(rlwe_cipher, mlwe_cipher_buffer, mlwe_cipher_buffer.size(), 0);
+    PPMM(plain_mat, mlwe_cipher_buffer, mat_M, mat_N, mat_K);
 
-    // PPMM(plain_mat, mlwe_cipher_buffer, mat_M, mat_N, mat_K);
-
-    mlweCipherPacking(rlwe_cipher, mlwe_cipher_buffer, mlwe_cipher_buffer.size(), 0);
-
-
-    // // scheme.decrypt_display(scheme_algo.secretkey, cipher, "ctReal after stc ");
-	// // Step 1: scale to q0/|m|
-    // // q0 / message_ratio = q0 / 4.0 == input.scale
-	// // Step 2 : Extend the basis from q to Q
-    // bootstrapper.modUpQ0toQL(rlwe_cipher);
-
-    // encodingMatrix.EvalCoeffsToSlots(encodingMatrix.m_U0hatTPreFFT, rlwe_cipher);
-
-    // // real = a-bi
-    // scheme.conjugate_23(*bootstrapper.ctReal, rlwe_cipher);
+    mlweCipherPacking(rlwe_cipher, mlwe_cipher_buffer, 256, 0);
+    coeffBitRev(rlwe_cipher);
 
 
-    // // imag = cipher - real = 2bi
-    // scheme.sub(*bootstrapper.ctImag, rlwe_cipher, *bootstrapper.ctReal);
-    // // real = real + cipher = 2a
-    // scheme.addAndEqual(*bootstrapper.ctReal, rlwe_cipher);
+    // scheme.decrypt_display(scheme_algo.secretkey, cipher, "ctReal after stc ");
+	// Step 1: scale to q0/|m|
+    // q0 / message_ratio = q0 / 4.0 == input.scale
+	// Step 2 : Extend the basis from q to Q
+    bootstrapper.modUpQ0toQL(rlwe_cipher, L);
 
-    // scheme.divByiAndEqual(*bootstrapper.ctImag);
-    // bootstrapper.EvalModAndEqual(*bootstrapper.ctReal);
-    // bootstrapper.EvalModAndEqual(*bootstrapper.ctImag);
+    encodingMatrix.EvalCoeffsToSlots(encodingMatrix.m_U0hatTPreFFT, rlwe_cipher);
 
-    // scheme.multConstAndEqual(*bootstrapper.ctReal, 256./16*16);
-    // scheme.multConstAndEqual(*bootstrapper.ctImag, 256./16*16);
+    // real = a-bi
+    scheme.conjugate_23(*bootstrapper.ctReal, rlwe_cipher);
+
+
+    // imag = cipher - real = 2bi
+    scheme.sub(*bootstrapper.ctImag, rlwe_cipher, *bootstrapper.ctReal);
+    // real = real + cipher = 2a
+    scheme.addAndEqual(*bootstrapper.ctReal, rlwe_cipher);
+
+    scheme.divByiAndEqual(*bootstrapper.ctImag);
+    bootstrapper.EvalModAndEqual(*bootstrapper.ctReal);
+    bootstrapper.EvalModAndEqual(*bootstrapper.ctImag);
+
+    scheme.multConstAndEqual(*bootstrapper.ctReal, 256./16*16);
+    scheme.multConstAndEqual(*bootstrapper.ctImag, 256./16*16);
 
     
     // // // Real part * 2
@@ -496,8 +499,33 @@ __host__ void PCMM_Scheme::PCMM_Boot(float* plain_mat, Ciphertext& rlwe_cipher, 
     // // scheme.multConstAndEqual(rlwe_cipher, 256./16*16);
 }
 
+__global__ void coeffBitRev_kernel(uint64_tt* vals, int logN) 
+{	
+	register int tid = blockIdx.x * 256 + threadIdx.x;
+	long x = bitReverse(tid, logN);
+    uint64_tt* vals_this_mod = vals + (blockIdx.y<<logN);
+    if (tid < x)
+    {
+        register uint64_tt temp = vals_this_mod[tid];
+        vals_this_mod[tid] = vals_this_mod[x];
+        vals_this_mod[x] = temp;
+    }
+}
 
-
+__host__ void PCMM_Scheme::coeffBitRev(Ciphertext& rlwe_cipher)
+{
+    int N = rlwe_cipher.N;
+    int K = context.K;
+    int L = rlwe_cipher.L;
+    int l = rlwe_cipher.l;
+    scheme.decryptMsg(*plain, sk, rlwe_cipher);
+    dim3 bitReverse_dim(N / 256, rlwe_cipher.l+1);
+    cout<<"bitReverse_dim: ("<< bitReverse_dim.x <<", "<< bitReverse_dim.y <<")"<<endl;
+	context.FromNTTInplace(plain->mx_device, 0, K, 1, l+1, L+1);
+    coeffBitRev_kernel <<<bitReverse_dim, 256, 0, 0>>> (plain->mx_device, context.logN);
+	context.ToNTTInplace(plain->mx_device, 0, K, 1, l+1, L+1);
+    scheme.encryptMsg(rlwe_cipher, *plain);
+}
 
 #define mlweDecrypt_block 128
 template<int mlwe_rank>
