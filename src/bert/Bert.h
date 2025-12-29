@@ -26,6 +26,8 @@ public:
     Ciphertext** tmpcipher_buffer;
     vector<MLWECiphertext*> mlwe_cipher_buffer;
     int PCMM_N1 = 128;
+    int q_ringpack_count;
+    int mlwe_rank;
     int mat_M = 768, mat_N = 768;
     int N;
     int L;
@@ -38,7 +40,9 @@ public:
     vector<Plaintext*> attn_LayerNorm_beta[12];
     vector<Plaintext*> layer_output_LayerNorm_gamma[12];
     vector<Plaintext*> layer_output_LayerNorm_beta[12];
-    
+    vector<Plaintext*> layer_query_bias[12];
+    vector<Plaintext*> layer_key_bias[12];
+    vector<Plaintext*> layer_value_bias[12];
 
     
     
@@ -57,6 +61,7 @@ public:
     void layer_output(vector<Ciphertext*> &O, int layer, vector<Ciphertext*> &layer_res);
     void boot(vector<Ciphertext*> &O);
     void PCMM_Boot_768_768(float* plain_mat, vector<Ciphertext*>& rlwe_cipher, vector<Ciphertext*>& res_cipher, int target_level, int do_s2c);
+    void test_PCMM_Boot_768_768(float* plain_mat, vector<Ciphertext*>& rlwe_cipher, vector<Ciphertext*>& res_cipher, int target_level, int do_s2c);
     
     void infer(vector<Ciphertext*> &encrypted_token);
 

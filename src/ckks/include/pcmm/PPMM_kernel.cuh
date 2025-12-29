@@ -91,7 +91,7 @@ __forceinline__ __device__ void ppmm_16x16_tcu(uint8_tt plain_buffer_split[][256
 
 using namespace cooperative_groups;
 template<int mat_N>
-__global__ void pcmm_cuda_core_kernel(float* plain_mat, uint64_tt** mlwe_cipher_pointer, uint64_tt* output, int N1, int mlwe_rank, int mod_num, int p_mod_num, long scaler, uint64_tt* qiInv_device, uint64_tt* qiInv_shoup_device)
+__global__ void pcmm_cuda_core_kernel(float* plain_mat, uint64_tt** mlwe_cipher_pointer, uint64_tt* output, int N1, int mlwe_rank, int mod_num, int p_mod_num, double scaler, uint64_tt* qiInv_device, uint64_tt* qiInv_shoup_device)
 {
 	// shared memory
     #if TILE_WIDTH_K == 32
@@ -134,7 +134,7 @@ __global__ void pcmm_cuda_core_kernel(float* plain_mat, uint64_tt** mlwe_cipher_
 
 
             for(int idx_mat_N = 0; idx_mat_N < mat_N / TILE_WIDTH_N; idx_mat_N++)
-            {
+            {       
                 pipeline.producer_acquire();
                 #if TILE_WIDTH_K == 32
                     #pragma unroll
@@ -251,13 +251,13 @@ __global__ void pcmm_cuda_core_kernel(float* plain_mat, uint64_tt** mlwe_cipher_
     }
 }
 
-__host__ void PCMM_Scheme::PPMM(float* plain_mat, vector<MLWECiphertext*> mlwe_cipher_decomposed, int mat_M, int mat_N, int mat_K)
+__host__ void PCMM_Scheme::PPMM(float* plain_mat, vector<MLWECiphertext*> mlwe_cipher_decomposed, int mat_M, int mat_N, int mat_K, int mlwe_num)
 {
     if(mat_K != pcmm_context.N1){
         cout << "matrix K should be equal to N1!" << endl;
         return;
     }
-    if(mat_N != mlwe_cipher_decomposed.size()){
+    if(mat_N != mlwe_num){
         cout << "matrix N should be equal to mlwe number!" << endl;
         return;
     }
@@ -269,7 +269,6 @@ __host__ void PCMM_Scheme::PPMM(float* plain_mat, vector<MLWECiphertext*> mlwe_c
     int ringpack_q_count = pcmm_context.ringpack_q_count;
     int ringpack_pq_count = pcmm_context.ringpack_pq_count;
 
-    int mlwe_num = mlwe_cipher_decomposed.size();
     // if(mlwe_cipher_decomposed.size() != mlwe_rank){
     //     cout << "only support packing k mlwe -> 1 rlwe!" << endl;
     //     return;
@@ -281,8 +280,11 @@ __host__ void PCMM_Scheme::PPMM(float* plain_mat, vector<MLWECiphertext*> mlwe_c
     }
     cudaMemcpy(repacking_cipher_pointer_device, repacking_cipher_pointer.data(), sizeof(uint64_tt*) * mlwe_num, cudaMemcpyHostToDevice);
 
-    long scaler = to_double(mlwe_cipher_decomposed[0]->scale);
+    NTL::RR ppmm_target_scale = NTL::RR(1LL << 49);
+    long scaler = to_double(pcmm_context.q_ringpack[1] * ppmm_target_scale / mlwe_cipher_decomposed[0]->scale);
     cout<<"scaler: "<<scaler<<endl;
+    cout << "ppmm_target_scale: " << ppmm_target_scale << endl;
+    cout << "get scaler: " << mlwe_cipher_decomposed[0]->scale * scaler / pcmm_context.q_ringpack[1] << endl;
 
 
     int SMem_size = (TILE_WIDTH_M * TILE_WIDTH_N * (sizeof(int64_tt)) + TILE_WIDTH_N * TILE_WIDTH_K * sizeof(uint64_tt)) * 2;// + TILE_WIDTH_M * TILE_WIDTH_K * sizeof(int);
@@ -325,13 +327,19 @@ __host__ void PCMM_Scheme::PPMM(float* plain_mat, vector<MLWECiphertext*> mlwe_c
             pcmm_cuda_core_kernel<768> <<<ppmm_block, ppmm_thread, SMem_size>>>(plain_mat, repacking_cipher_pointer_device, ppmm_output, N1, mlwe_rank, ringpack_q_count, ringpack_p_count, scaler, 
                 context.qiInvVecModql_device + l*(l-1)/2, context.qiInvVecModql_shoup_device + l*(l-1)/2);
                 cout<<"call 1 mat_N = "<<768<<endl;
+        } else if (mat_N == 3072){
+            // 设置shared_memory 大小
+            cudaFuncSetAttribute(&pcmm_cuda_core_kernel<3072>, cudaFuncAttributeMaxDynamicSharedMemorySize, SMem_size);
+            pcmm_cuda_core_kernel<3072> <<<ppmm_block, ppmm_thread, SMem_size>>>(plain_mat, repacking_cipher_pointer_device, ppmm_output, N1, mlwe_rank, ringpack_q_count, ringpack_p_count, scaler, 
+                context.qiInvVecModql_device + l*(l-1)/2, context.qiInvVecModql_shoup_device + l*(l-1)/2);
+                cout<<"call 1 mat_N = "<<3072<<endl;
         }
     } else {
         cout << "tile size should be equal to 32!" << endl;
         return;
     }
     float temp = cuTimer.stop();
-    printf("ppmm kernel time: %.3f ms\n", temp);
+    printf(" %.3f ms\n", temp);
     printf("pcmm thread(%d, %d), block(%d, %d)\n", ppmm_thread.x, ppmm_thread.y, ppmm_block.x, ppmm_block.y);
 
     for(int i = 0; i < mlwe_num; i++){

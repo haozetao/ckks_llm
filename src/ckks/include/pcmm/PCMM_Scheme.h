@@ -40,9 +40,12 @@ public:
     // modpacking algorithm
     __host__ void mlweCipherPacking(Ciphertext& rlwe_cipher, vector<MLWECiphertext*> mlwe_cipher_decomposed, uint64_tt mlwe_num, uint64_tt offset);
 
-    __host__ void PPMM(float* plain_mat, vector<MLWECiphertext*> mlwe_cipher_decomposed, int mat_M, int mat_N, int mat_K);
+    __host__ void PPMM(float* plain_mat, vector<MLWECiphertext*> mlwe_cipher_decomposed, int mat_M, int mat_N, int mat_K, int mlwe_num);
 
     __host__ void coeffBitRev(Ciphertext& rlwe_cipher);
+    __host__ void realData_coeffShift(Ciphertext& rlwe_cipher, int flag, int for_512);
+
 
     __host__ void PCMM_Boot(float* plain_mat, Ciphertext& rlwe_cipher, vector<MLWECiphertext*>& mlwe_cipher_decomposed, int mat_M, int mat_N, int mat_K);
+    __host__ void test_PCMM_Boot(float* plain_mat, Ciphertext& rlwe_cipher, vector<MLWECiphertext*>& mlwe_cipher_decomposed, int mat_M, int mat_N, int mat_K);
 };

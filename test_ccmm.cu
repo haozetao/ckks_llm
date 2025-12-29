@@ -82,7 +82,8 @@ float temp = 0;
     EncodingMatrix encodingMatrix(sk, scheme, 3, 3, is_STC_first);
     Bootstrapper bootHelper(context, scheme, scheme_algo, sk, encodingMatrix, is_STC_first);
     //     bootHelper.addBootstrappingKey(sk);
-    Attention attention_scheme(context, scheme, scheme_algo, 128, 12, 64);
+    // Attention attention_scheme(context, scheme, scheme_algo, 128, 12, 64);
+    Attention attention_scheme(context, scheme, scheme_algo, 128, 12, 64, sk);
     attention_scheme.addKey(sk);
 
     cuDoubleComplex* mes1, *mes2;
@@ -90,9 +91,9 @@ float temp = 0;
     mes2 = new cuDoubleComplex[slots];
 	cuDoubleComplex* mes3 = new cuDoubleComplex[slots];
 
-    randomComplexArray(mes1, slots, -1, 1);
-    randomComplexArray(mes2, slots, -1, 1);
-    randomComplexArray(mes3, slots, 1.0);
+    randomComplexArray(mes1, slots, -0.1, 0.1);
+    randomComplexArray(mes2, slots, -0.1, 0.1);
+    randomComplexArray(mes3, slots, 0.1);
 
     // splited ccmm param
     // vector<Ciphertext *>cQ(4);
@@ -139,9 +140,9 @@ float temp = 0;
     }
 
     /****************Verify ccmm *V ******************************/
-    read_matrix_from_file("python/data/V.txt", mes1, slots);
-    read_matrix_from_file("python/data/sigma_A_1.txt", mes2, slots);
-    read_matrix_from_file("python/data/sigma_A_2.txt", mes3, slots);
+    // read_matrix_from_file("python/data/V.txt", mes1, slots);
+    // read_matrix_from_file("python/data/sigma_A_1.txt", mes2, slots);
+    // read_matrix_from_file("python/data/sigma_A_2.txt", mes3, slots);
     /****************end Verify ccmm *V ******************************/
 
     cuDoubleComplex* complex_msg1, *complex_msg2, *complex_msg3;
@@ -199,18 +200,18 @@ float temp = 0;
             context.encode(complex_msg3, plain_m3);
             scheme.encryptMsg(c3, plain_m3);
             cudaEventRecord(start);
-                // cout << "before level " << c1.l << endl;
-                // attention_scheme.CCMM_QK(c1, c2, c3, c4);
-                // cout << "res level " << c3.l << endl;
-                // cout << "res level " << c4.l << endl;
+                cout << "before level " << c1.l << endl;
+                attention_scheme.CCMM_QK(c1, c2, c3, c4);
+                cout << "res level " << c3.l << endl;
+                cout << "res level " << c4.l << endl;
                 // cout << "res scale " << c3.scale << endl;
                 // cout << "res scale " << c4.scale << endl;
                 // attention_scheme.CCMM_QK_splited_heads(cQ,cK,cO,16);
                 // scheme.leftRotateAddSelf_23(c1, 2);
                 
-                attention_scheme.TauAndEqual(c1);
-                cout << "KS_SV = " << attention_scheme.KS_SV << endl;
-                attention_scheme.CCMM_V(c2, c3, c1, c4);
+                // attention_scheme.TauAndEqual(c1);
+                // cout << "KS_SV = " << attention_scheme.KS_SV << endl;
+                // attention_scheme.CCMM_V(c2, c3, c1, c4);
             cudaEventRecord(end);
             cudaEventSynchronize(end);
             cudaEventElapsedTime(&temp, start, end);
@@ -235,110 +236,110 @@ float temp = 0;
             dec = min(dec, temp);
 
             /******************** Verify Q*K^T *********************************/
-            // cuDoubleComplex *target_res1, *target_res2;
-            // cuDoubleComplex *res1;
-            // Plaintext dec_m1(N, L, target_level, slots, NTL::RR(context.precision));
-            // target_res1 = new cuDoubleComplex[slots];
-            // target_res2 = new cuDoubleComplex[slots];
-            // res1 = new cuDoubleComplex[slots];
-            // memset(target_res1, 0, sizeof(cuDoubleComplex) * slots);
-            // memset(target_res2, 0, sizeof(cuDoubleComplex) * slots);
+            cuDoubleComplex *target_res1, *target_res2;
+            cuDoubleComplex *res1;
+            Plaintext dec_m1(N, L, target_level, slots, NTL::RR(context.precision));
+            target_res1 = new cuDoubleComplex[slots];
+            target_res2 = new cuDoubleComplex[slots];
+            res1 = new cuDoubleComplex[slots];
+            memset(target_res1, 0, sizeof(cuDoubleComplex) * slots);
+            memset(target_res2, 0, sizeof(cuDoubleComplex) * slots);
 
 
-            // for (int j=0; j<64; j++){
-            //     for (int i = 0; i<128; i++){
-            //         for (int t = 0; t<4; t++){
-            //             for (int k = 0; k<64; k++){
-            //                 target_res1[i*256 + t*64 +j] = cuCadd(cuCmul(mes1[((i+j)%128)*256+ t*64 + k] , mes2[((i+j)%128)*256+ t*64 + k]), target_res1[i*256 + t*64 +j]);
-            //                 target_res2[i*256 + t*64 +j] = cuCadd(cuCmul(mes1[((i+j+64)%128)*256+ t*64 + k] , mes2[((i+j+64)%128)*256+ t*64 + k]), target_res2[i*256 + t*64 +j]);
-            //             }
-            //         }
-            //     }
-            // }
+            for (int j=0; j<64; j++){
+                for (int i = 0; i<128; i++){
+                    for (int t = 0; t<4; t++){
+                        for (int k = 0; k<64; k++){
+                            target_res1[i*256 + t*64 +j] = cuCadd(cuCmul(mes1[((i+j)%128)*256+ t*64 + k] , mes2[((i+j)%128)*256+ t*64 + k]), target_res1[i*256 + t*64 +j]);
+                            target_res2[i*256 + t*64 +j] = cuCadd(cuCmul(mes1[((i+j+64)%128)*256+ t*64 + k] , mes2[((i+j+64)%128)*256+ t*64 + k]), target_res2[i*256 + t*64 +j]);
+                        }
+                    }
+                }
+            }
             
 
-            // scheme.decryptMsg(dec_m1, sk, c3);
-            // context.decode(dec_m1, complex_msg_dec);
-            // cudaMemcpy(res1, complex_msg_dec, sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);            
-            // vector<cuDoubleComplex> values_computed(slots);
-            // cudaMemcpy(values_computed.data(), complex_msg_dec, sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);
-            // vector<cuDoubleComplex> values_want(slots);
-            // for (int i=0; i<slots; i++){
-            //     values_want[i].x = 0;
-            //     values_want[i].y = 0;
-            // }
-            // for (int j=0; j<64; j++){
-            //     for (int i = 0; i<128; i++){
-            //         for (int t = 0; t<4; t++){
-            //             for (int k = 0; k<64; k++){
-            //                 values_want[i*256 + t*64 +j].x += mes1[i*256+ t*64 + k].x * mes2[((i+j)%128)*256+ t*64 + k].x;
-            //             }
-            //         }
-            //     }
-            // }
+            scheme.decryptMsg(dec_m1, sk, c3);
+            context.decode(dec_m1, complex_msg_dec);
+            cudaMemcpy(res1, complex_msg_dec, sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);            
+            vector<cuDoubleComplex> values_computed(slots);
+            cudaMemcpy(values_computed.data(), complex_msg_dec, sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);
+            vector<cuDoubleComplex> values_want(slots);
+            for (int i=0; i<slots; i++){
+                values_want[i].x = 0;
+                values_want[i].y = 0;
+            }
+            for (int j=0; j<64; j++){
+                for (int i = 0; i<128; i++){
+                    for (int t = 0; t<4; t++){
+                        for (int k = 0; k<64; k++){
+                            values_want[i*256 + t*64 +j].x += mes1[i*256+ t*64 + k].x * mes2[((i+j)%128)*256+ t*64 + k].x;
+                        }
+                    }
+                }
+            }
 
-            // auto status = GetPrecisionStats(values_computed, values_want);
-            // cout<<status.String();
+            auto status = GetPrecisionStats(values_computed, values_want);
+            cout<<status.String();
 
-            // scheme.decryptMsg(dec_m1, sk, c4);
-            // context.decode(dec_m1, complex_msg_dec);
-            // cudaMemcpy(res1, complex_msg_dec, sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);            
-            // cudaMemcpy(values_computed.data(), complex_msg_dec, sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);
-            // for (int i=0; i<slots; i++){
-            //     values_want[i].x = 0;
-            //     values_want[i].y = 0;
-            // }
-            // for (int j=0; j<64; j++){
-            //     for (int i = 0; i<128; i++){
-            //         for (int t = 0; t<4; t++){
-            //             for (int k = 0; k<64; k++){
-            //                 values_want[i*256 + t*64 +j].x += mes1[i*256+ t*64 + k].x * mes2[((i+j+64)%128)*256+ t*64 + k].x;
-            //             }
-            //         }
-            //     }
-            // }
-            // status = GetPrecisionStats(values_computed, values_want);
-            // cout<<status.String();
+            scheme.decryptMsg(dec_m1, sk, c4);
+            context.decode(dec_m1, complex_msg_dec);
+            cudaMemcpy(res1, complex_msg_dec, sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);            
+            cudaMemcpy(values_computed.data(), complex_msg_dec, sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);
+            for (int i=0; i<slots; i++){
+                values_want[i].x = 0;
+                values_want[i].y = 0;
+            }
+            for (int j=0; j<64; j++){
+                for (int i = 0; i<128; i++){
+                    for (int t = 0; t<4; t++){
+                        for (int k = 0; k<64; k++){
+                            values_want[i*256 + t*64 +j].x += mes1[i*256+ t*64 + k].x * mes2[((i+j+64)%128)*256+ t*64 + k].x;
+                        }
+                    }
+                }
+            }
+            status = GetPrecisionStats(values_computed, values_want);
+            cout<<status.String();
             /******************** end Verify Q*K^T *********************************/
 
             /******************** Verify *V *********************************/
             // verify tau
-            cuDoubleComplex *target_res1;
-            target_res1 = new cuDoubleComplex[slots];
-            Plaintext dec_m1(N, L, target_level, slots, NTL::RR(context.precision));
-            read_matrix_from_file("python/data/tau_V.txt", target_res1, slots);
-            scheme.decryptMsg(dec_m1, sk, c1);
-            context.decode(dec_m1, complex_msg_dec);
-            vector<cuDoubleComplex> values_computed(slots);
-            cudaMemcpy(values_computed.data(), complex_msg_dec, sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);
-            vector<cuDoubleComplex> values_want(slots);
-            cudaMemcpy(values_want.data(), target_res1, sizeof(cuDoubleComplex) * slots, cudaMemcpyHostToHost);
-            auto status = GetPrecisionStats(values_computed, values_want);
-            cout<<status.String();
-
-            // verify *V
-            // c2,c3 is sigma(A)
-            cuDoubleComplex *target_res_ccmmV;
-            target_res_ccmmV = new cuDoubleComplex[slots];
-            Plaintext dec_ccmmV(N, L, target_level, slots, NTL::RR(context.precision));
-            memset(target_res_ccmmV, 0, sizeof(cuDoubleComplex) * slots);
-            read_matrix_from_file("python/data/mul_V_res.txt", target_res_ccmmV, slots);
-
-            scheme.decryptMsg(dec_ccmmV, sk, c4);
-            context.decode(dec_ccmmV, complex_msg_dec);
+            // cuDoubleComplex *target_res1;
+            // target_res1 = new cuDoubleComplex[slots];
+            // Plaintext dec_m1(N, L, target_level, slots, NTL::RR(context.precision));
+            // read_matrix_from_file("python/data/tau_V.txt", target_res1, slots);
+            // scheme.decryptMsg(dec_m1, sk, c1);
+            // context.decode(dec_m1, complex_msg_dec);
             // vector<cuDoubleComplex> values_computed(slots);
-            cudaMemcpy(values_computed.data(), complex_msg_dec, sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);
+            // cudaMemcpy(values_computed.data(), complex_msg_dec, sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);
             // vector<cuDoubleComplex> values_want(slots);
-            cudaMemcpy(values_want.data(), target_res_ccmmV, sizeof(cuDoubleComplex) * slots, cudaMemcpyHostToHost);
-
+            // cudaMemcpy(values_want.data(), target_res1, sizeof(cuDoubleComplex) * slots, cudaMemcpyHostToHost);
             // auto status = GetPrecisionStats(values_computed, values_want);
-            status = GetPrecisionStats(values_computed, values_want);
-            // for (int i = 0; i < slots; i++){
-            //     if (abs(values_computed[i].x-values_want[i].x)>0.01)
-            //     cout << i << ' ';
-            // }
-            cout << endl;
-            cout<<status.String();
+            // cout<<status.String();
+
+            // // verify *V
+            // // c2,c3 is sigma(A)
+            // cuDoubleComplex *target_res_ccmmV;
+            // target_res_ccmmV = new cuDoubleComplex[slots];
+            // Plaintext dec_ccmmV(N, L, target_level, slots, NTL::RR(context.precision));
+            // memset(target_res_ccmmV, 0, sizeof(cuDoubleComplex) * slots);
+            // read_matrix_from_file("python/data/mul_V_res.txt", target_res_ccmmV, slots);
+
+            // scheme.decryptMsg(dec_ccmmV, sk, c4);
+            // context.decode(dec_ccmmV, complex_msg_dec);
+            // // vector<cuDoubleComplex> values_computed(slots);
+            // cudaMemcpy(values_computed.data(), complex_msg_dec, sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);
+            // // vector<cuDoubleComplex> values_want(slots);
+            // cudaMemcpy(values_want.data(), target_res_ccmmV, sizeof(cuDoubleComplex) * slots, cudaMemcpyHostToHost);
+
+            // // auto status = GetPrecisionStats(values_computed, values_want);
+            // status = GetPrecisionStats(values_computed, values_want);
+            // // for (int i = 0; i < slots; i++){
+            // //     if (abs(values_computed[i].x-values_want[i].x)>0.01)
+            // //     cout << i << ' ';
+            // // }
+            // cout << endl;
+            // cout<<status.String();
 
             /******************** end Verify *V *********************************/
         }

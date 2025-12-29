@@ -60,8 +60,8 @@ int main(int argc, char* argv[])
     double* message_host_real = new double[N];
     randomComplexArray(message_host, slots, -1./10, 1./10);
     for(int i = 0; i < slots; i++){
-        message_host_real[2*i] = message_host[i].x;
-        message_host_real[2*i + 1] = message_host[i].y;
+        message_host_real[i] = message_host[i].x;
+        message_host_real[i + slots] = message_host[i].y;
     }
     for(int i = 0; i < 8; i++){
         printf("%lf, ", message_host[i]);
@@ -149,7 +149,9 @@ int main(int argc, char* argv[])
             temp = cuTimer.stop();
             conj_time = min(conj_time, temp);
             
+            cout << "before ppmm boot scale: " << c2.scale << endl;
             pcmm_scheme.PCMM_Boot(plain_mat_device, c2, mlwe_cipher_decomposed, mat_M, mat_N, PCMM_N1);
+            cout << "after ppmm boot scale: " << c2.scale << endl;
             // encodingMatrix.EvalSlotsToCoeffs(encodingMatrix.m_U0PreFFT, c2);
 
             // // scheme.decrypt_display(sk, c2, "dec c2");
@@ -189,8 +191,8 @@ int main(int argc, char* argv[])
         vector<cuDoubleComplex> real_values_want(slots);
         // memcpy(real_values_want.data(), plain_gemm_host, sizeof(double) * N);
         for(int i = 0; i < slots; i++){
-            real_values_want[i].x = plain_gemm_host[2*i];
-            real_values_want[i].y = plain_gemm_host[2*i + 1];
+            real_values_want[i].x = plain_gemm_host[i];
+            real_values_want[i].y = plain_gemm_host[i + slots];
         }
 
         cout<<endl;

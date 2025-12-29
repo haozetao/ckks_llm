@@ -147,6 +147,7 @@ void randomComplexArray(cuDoubleComplex* ComplexArray, long slots, double lower 
 		// ComplexArray[i].x = (double) rand()/(RAND_MAX) * bound;
 		// ComplexArray[i].x = ( i % 64) / 100.;
 		ComplexArray[i].y = 0;
+        // ComplexArray[i].y = randnum(rng);
 
         // ComplexArray[i].y = (double) rand()/(RAND_MAX) * bound;
 	}

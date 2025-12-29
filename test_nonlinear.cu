@@ -3,6 +3,7 @@
 #include <sstream>
 #include <vector>
 #include <cmath>
+#include <fstream>
 
 using namespace std;
 
@@ -13,6 +14,7 @@ using namespace std;
 #include "src/ckks/include/TimeUtils.cuh"
 #include "src/ckks/include/precision.cuh"
 #include "src/ckks/attention/Attention.cuh"
+void load_softmax_input(const std::string& filename, vector<cuDoubleComplex*>& mes, int token_len, int d);
 
 int main(int argc, char* argv[])
 {
@@ -68,7 +70,7 @@ float temp = 0;
     int is_STC_first = 1;
     SchemeAlgo scheme_algo(context, scheme, sk);
         scheme_algo.malloc_bsgs_buffer(context.eval_sine_chebyshev_coeff.size());
-    Attention attention_scheme(context, scheme, scheme_algo, 128, 12, 64);
+    Attention attention_scheme(context, scheme, scheme_algo, 128, 12, 64,sk);
         attention_scheme.addKey(sk);
 
 
@@ -77,7 +79,7 @@ float temp = 0;
 	mes2 = new cuDoubleComplex[slots];
     mes3 = new cuDoubleComplex[slots];
 
-    randomComplexArray(mes1, slots, 0, 1);
+    randomComplexArray(mes1, slots, -10, 10);
     randomComplexArray(mes2, slots, -0.008, 0.009);
     randomComplexArray(mes3, slots, -0.008, 0.009);
 
@@ -93,7 +95,16 @@ float temp = 0;
     
     print_device_array(complex_msg1, 8, "message1");
     print_device_array(complex_msg2, 8, "message2");
-    print_device_array(complex_msg3, 8, "message2");
+    // print_device_array(complex_msg3, 8, "message3");
+    vector<cuDoubleComplex*> message_host;
+    vector<cuDoubleComplex*> message_device;
+    load_softmax_input("softmaxInput_04_103847_281171.bin", message_host, 128, 768);
+    for (int i = 0; i < 2; i++){
+        cuDoubleComplex* mes_device;
+        cudaMalloc(&mes_device, sizeof(cuDoubleComplex) * slots);
+        cudaMemcpy(mes_device, message_host[i], sizeof(cuDoubleComplex) * slots, cudaMemcpyHostToDevice);
+        message_device.push_back(mes_device);
+    }
 
     int target_level = L;
     // for(target_level; target_level >= 0; target_level--)
@@ -122,6 +133,8 @@ float temp = 0;
             ecd = min(ecd, temp);
                 context.encode(complex_msg2, plain_m2);
                 context.encode(complex_msg3, plain_m3);
+                context.encode(message_device[0], plain_m1);
+                context.encode(message_device[1], plain_m2);
 
             cudaEventRecord(start);
                 scheme.encryptMsg(c1, plain_m1);
@@ -136,12 +149,15 @@ float temp = 0;
             cout<<"c1.level before nonlinear: "<<c1.l <<"  scale: "<<c1.scale<<endl;
             cuTimer.start();
                 // attention_scheme.evalExp(c1);
+                // attention_scheme.evalExp_iter(c1, 1);
                 // attention_scheme.evalInv(c1, 10);
                 // attention_scheme.evalSqrtInv(c1, sk, 10000);
                 // attention_scheme.evalSoftMax(cipher_P);
-                attention_scheme.evalSoftMax_phase1(cipher_P);
-                cout<<"c1.level after evalSoftMax_phase1: "<<c1.l <<"  scale: "<<c1.scale<<endl;
-                attention_scheme.evalSoftMax_phase2(cipher_P);
+                // attention_scheme.evalSoftMax_phase1(cipher_P);
+                attention_scheme.evalSoftMax_phase1_iter(cipher_P,1);
+                // cout<<"c1.level after evalSoftMax_phase1: "<<c1.l <<"  scale: "<<c1.scale<<endl;
+                attention_scheme.evalSoftMax_phase2(cipher_P, sk);
+                // attention_scheme.FASHE_evalSoftMax(cipher_P, sk);
 
                 // attention_scheme.evalGeLU(c1);
                 // attention_scheme.evalSiLU(c1);
@@ -179,6 +195,7 @@ float temp = 0;
         dcd = min(dcd, temp);
         // print_device_array(complex_msg_dec, 8, "message_dec1");
         scheme.decrypt_display(sk, c1, "approx softmax");
+        scheme.decrypt_display(sk, c2, "approx softmax");
 
         // vector<cuDoubleComplex> values_computed(slots);
         vector<cuDoubleComplex> values_computed(slots*2);
@@ -197,24 +214,27 @@ float temp = 0;
         // vector<cuDoubleComplex> values_want(slots);
         vector<cuDoubleComplex> values_want(slots*2);
         // vector<cuDoubleComplex> values_want(slots*3);
-        cudaMemcpy(values_want.data(), complex_msg1, sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);
-        cudaMemcpy(values_want.data() + slots, complex_msg2, sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);
+        // cudaMemcpy(values_want.data(), complex_msg1, sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);
+        // cudaMemcpy(values_want.data() + slots, complex_msg2, sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);
         // cudaMemcpy(values_want.data() + 2*slots, complex_msg3, sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);
+        cudaMemcpy(values_want.data(), message_device[0], sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);
+        cudaMemcpy(values_want.data() + slots, message_device[1], sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);
         cout<<"target: ";
         // verify nonlinear
-        for(int i = 0; i < slots; i++){
+        for(int i = 0; i < 2*slots; i++){
             double x = values_want[i].x;
             // values_want[i].x = 1/x;
             // values_want[i].x = 1/pow(x, 0.5);
-            // values_want[i].x = exp(x);
+            // values_want[i].x = exp(((x-10)));
             // values_want[i].x = x * normcdf(x);
             // values_want[i].x = x * (1 / (1+exp(-x)));
-            if(i < 8) printf("%.8lf, ", values_want[i].x);
+            // if(i < 8) printf("%.8lf, ", values_want[i].x);
         }
 
         // verify softmax
         int token_len = attention_scheme.token_len;
         int d = attention_scheme.d;
+        double max_val = -1e20;
         // 256 columns
         for(int row_id = 0; row_id < token_len; row_id++){
             int row_len = slots / token_len;
@@ -230,6 +250,7 @@ float temp = 0;
                 for(int i = 0; i < token_len; i++){
                     int offset = + (i%d) + (i/d)*slots;
                     values_want[row_id * row_len + block_id * d + offset].x /= sum;
+                    // max_val = max();
                 }
 
                 if(row_id == 0 && block_id == 0)
@@ -240,7 +261,7 @@ float temp = 0;
             }
         }
 
-        // verify LayerNorm
+        // // verify LayerNorm
         // int token_len = attention_scheme.token_len;
         // int d = attention_scheme.d;
         // int column_num = slots / token_len;
@@ -287,4 +308,34 @@ float temp = 0;
 
 
     return 0;
+}
+void load_softmax_input(const std::string& filename, vector<cuDoubleComplex*>& mes, int token_len, int d) {
+    int cipher_num = 2;
+    std::ifstream file(filename, std::ios::binary);
+    if (!file) {
+        std::cerr << "Cannot open file: " << filename << std::endl;
+    }
+    for (int i = 0; i < cipher_num; i++){
+        cuDoubleComplex* data = (cuDoubleComplex*)malloc(32768 * sizeof(cuDoubleComplex));
+        mes.push_back(data);
+    }
+
+
+    std::vector<float> floatData(32768 * cipher_num);
+    file.read(reinterpret_cast<char*>(floatData.data()), 32768 * cipher_num);
+    file.close();
+    double max_data = 0;
+    for (int i = 0; i < token_len; i++) {
+        for (int j = 0; j < 64; j++) {
+            for (int k = 0; k < 4; k++){
+                mes[0][i*256+k*64+j].x = static_cast<double>(floatData[i*128 + j + k*128*128]);
+                mes[0][i*256+k*64+j].y = 0;
+                mes[1][i*256+k*64+j].x = static_cast<double>(floatData[i*128 + j + k*128*128 + 64]);
+                mes[1][i*256+k*64+j].y = 0;
+                max_data = max(abs(mes[0][i*256+k*64+j].x), max_data);
+                max_data = max(abs(mes[1][i*256+k*64+j].x), max_data);
+            }
+        }
+    }
+    cout << "max_data = " << max_data << endl;
 }

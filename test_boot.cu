@@ -175,6 +175,7 @@ float temp = 0;
 
             cuTimer.start();
                 cout<<"c1.level before bootstrapping: "<<c1.l<<endl;
+                c1.scale *= 8;
                 bootHelper.Bootstrapping(c1);   
                 cout<<"c1.level after bootstrapping: "<<c1.l<<endl;   
             temp = cuTimer.stop();

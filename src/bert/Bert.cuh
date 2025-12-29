@@ -20,8 +20,8 @@ Bert::Bert(string model_catalog, Context_23& context, Scheme_23& scheme, SchemeA
     vector<uint64_tt> p_ringpack = {context.pVec[context.p_num - 1]};
     vector<uint64_tt> q_ringpack = {context.qVec[0], context.qVec[1]};
     int p_ringpack_count = p_ringpack.size();
-    int q_ringpack_count = q_ringpack.size();
-    int mlwe_rank = context.N / PCMM_N1;
+    q_ringpack_count = q_ringpack.size();
+    mlwe_rank = context.N / PCMM_N1;
     // int decomp_num = mlwe_rank / 2;
     int decomp_num = 3072;
     for(int i = 0; i < decomp_num; i++){
@@ -104,21 +104,77 @@ Bert::Bert(string model_catalog, Context_23& context, Scheme_23& scheme, SchemeA
             layer_output_LayerNorm_beta[layer].push_back(beta);
         }
     }
+    // prepare for qkv bias
+    for (int layer = 0; layer < 12; layer++){
+        cudaMemcpy(tmp_gamma, model_weights.attention_self_query_bias[layer], sizeof(float)*column_num*cipher_num, cudaMemcpyDeviceToHost);
+        for (int i = 0; i < cipher_num; i++){
+            Plaintext* bias = new Plaintext(N, L, L, slots, NTL::RR(context.precision));
+            for (int j = 0; j < attention_scheme.token_len; j++){
+                for (int k = 0; k < column_num; k++){
+                    gamma_buffer_host[j*column_num+k].x = tmp_gamma[k + i*column_num];
+                    gamma_buffer_host[j*column_num+k].y = 0;
+                }
+            }
+            cudaMemcpy(gamma_buffer_device, gamma_buffer_host, sizeof(cuDoubleComplex) * slots, cudaMemcpyHostToDevice);
+            context.encode(gamma_buffer_device, *bias);
+            layer_query_bias[layer].push_back(bias);
+        }
+    }
+    for (int layer = 0; layer < 12; layer++){
+        cudaMemcpy(tmp_gamma, model_weights.attention_self_key_bias[layer], sizeof(float)*column_num*cipher_num, cudaMemcpyDeviceToHost);
+        for (int i = 0; i < cipher_num; i++){
+            Plaintext* bias = new Plaintext(N, L, L, slots, NTL::RR(context.precision));
+            for (int j = 0; j < attention_scheme.token_len; j++){
+                for (int k = 0; k < column_num; k++){
+                    gamma_buffer_host[j*column_num+k].x = tmp_gamma[k + i*column_num];
+                    gamma_buffer_host[j*column_num+k].y = 0;
+                }
+            }
+            cudaMemcpy(gamma_buffer_device, gamma_buffer_host, sizeof(cuDoubleComplex) * slots, cudaMemcpyHostToDevice);
+            context.encode(gamma_buffer_device, *bias);
+            layer_key_bias[layer].push_back(bias);
+        }
+    }
+    for (int layer = 0; layer < 12; layer++){
+        cudaMemcpy(tmp_gamma, model_weights.attention_self_value_bias[layer], sizeof(float)*column_num*cipher_num, cudaMemcpyDeviceToHost);
+        for (int i = 0; i < cipher_num; i++){
+            Plaintext* bias = new Plaintext(N, L, L, slots, NTL::RR(context.precision));
+            for (int j = 0; j < attention_scheme.token_len; j++){
+                for (int k = 0; k < column_num; k++){
+                    gamma_buffer_host[j*column_num+k].x = tmp_gamma[k + i*column_num];
+                    gamma_buffer_host[j*column_num+k].y = 0;
+                }
+            }
+            cudaMemcpy(gamma_buffer_device, gamma_buffer_host, sizeof(cuDoubleComplex) * slots, cudaMemcpyHostToDevice);
+            context.encode(gamma_buffer_device, *bias);
+            layer_value_bias[layer].push_back(bias);
+        }
+    }
 }
 
 void Bert::mul_W_QKV(vector<Ciphertext*> &X, Bert_model_weights &model_weights, vector<Ciphertext*> &resQ, vector<Ciphertext*> &resK, vector<Ciphertext*> &resV, int layer){
     cout << "(*X[0]).L " << (*X[0]).L << endl;
-    PCMM_Boot_768_768(model_weights.attention_self_query_weight[layer], X, resQ, (*X[0]).L-2, 0);
-    cout << "111" << endl;
-    PCMM_Boot_768_768(model_weights.attention_self_key_weight[layer], X, resK, (*X[0]).L-2, 0);
-    cout << "222" << endl;
-    PCMM_Boot_768_768(model_weights.attention_self_value_weight[layer], X, resV, 18, 0);
-    cout << "333" << endl;
+    PCMM_Boot_768_768(model_weights.attention_self_query_weight[layer], X, resQ, (*X[0]).L-2, 1);
+    scheme.addConstAndEqual(*resQ[0], *layer_query_bias[layer][0]);
+    scheme.addConstAndEqual(*resQ[1], *layer_query_bias[layer][1]);
+    scheme.addConstAndEqual(*resQ[2], *layer_query_bias[layer][2]);
+    PCMM_Boot_768_768(model_weights.attention_self_key_weight[layer], X, resK, (*X[0]).L-2, 1);
+    scheme.addConstAndEqual(*resK[0], *layer_key_bias[layer][0]);
+    scheme.addConstAndEqual(*resK[1], *layer_key_bias[layer][1]);
+    scheme.addConstAndEqual(*resK[2], *layer_key_bias[layer][2]);
+    PCMM_Boot_768_768(model_weights.attention_self_value_weight[layer], X, resV, 18, 1);
+    scheme.addConstAndEqual(*resV[0], *layer_value_bias[layer][0]);
+    scheme.addConstAndEqual(*resV[1], *layer_value_bias[layer][1]);
+    scheme.addConstAndEqual(*resV[2], *layer_value_bias[layer][2]);
 }
 
 void Bert::attn_QK(vector<Ciphertext*> &Q, vector<Ciphertext*> &K, vector<Ciphertext*> &O){
     for (int i = 0; i < Q.size(); i++){
+        // scheme.decrypt_display(sk, *Q[i], "before CCMM_QK *Q[i]");
+        // scheme.decrypt_display(sk, *K[i], "before CCMM_QK *K[i]");
         attention_scheme.CCMM_QK(*Q[i], *K[i], *O[2*i], *O[2*i+1]);
+        // scheme.decrypt_display(sk, *O[2*i], "after CCMM_QK O[2*i]");
+        // scheme.decrypt_display(sk, *O[2*i+1], "after CCMM_QK O[2*i+1]");
     }
 }
 
@@ -126,9 +182,11 @@ void Bert::attn_Softmax_phase1(vector<Ciphertext*> &O){
     for (int i = 0; i < O.size()/2; i++){
         vector<Ciphertext *> Softmax_input = {O[2*i], O[2*i+1]};
         double sqrt_d = sqrt(attention_scheme.d);
-        (*O[2*i]).scale = (*O[2*i]).scale * sqrt_d;
-        (*O[2*i+1]).scale = (*O[2*i+1]).scale * sqrt_d;
-        attention_scheme.evalSoftMax_phase1(Softmax_input);
+        // scheme.decrypt_display(sk, *O[2*i], "before Softmax_phase1 O[2*i]");
+        // scheme.decrypt_display(sk, *O[2*i+1], "before Softmax_phase1 O[2*i+1]");
+        attention_scheme.evalSoftMax_phase1_mul_sqrtd(Softmax_input);
+        // scheme.decrypt_display(sk, *O[2*i], "after Softmax_phase1 O[2*i]");
+        // scheme.decrypt_display(sk, *O[2*i+1], "after Softmax_phase1 O[2*i+1]");
     }
 }
 
@@ -136,8 +194,10 @@ void Bert::attn_Softmax_phase2(vector<Ciphertext*> &O){
     for (int i = 0; i < O.size()/2; i++){
         vector<Ciphertext *> Softmax_input = {O[2*i], O[2*i+1]};
         cout << "before evalSoftMax_phase2 scale " << O[2*i]->scale << endl;
-        attention_scheme.evalSoftMax_phase2(Softmax_input);
+        attention_scheme.evalSoftMax_phase2(Softmax_input, sk);
         cout << "after evalSoftMax_phase2 scale " << O[2*i]->scale << endl;
+        scheme.decrypt_display(sk, *O[2*i], "after Softmax_phase2 O[2*i]");
+        scheme.decrypt_display(sk, *O[2*i+1], "after Softmax_phase2 O[2*i+1]");
     }
 }
 
@@ -150,12 +210,18 @@ void Bert::attn_output(vector<Ciphertext*> &O, int layer){
     cuTimer.start();
     PCMM_Boot_768_768(model_weights.attention_output_dense_weight[layer], O, O, (*O[0]).L, 1);
     cout << "attn_output pcmm time "  << cuTimer.stop() << endl;
+    scheme.decrypt_display(sk, *O[0], "after pcmm768");
+    scheme.decrypt_display(sk, *O[1], "after pcmm768");
+    scheme.decrypt_display(sk, *O[2], "after pcmm768");
 
     cout<<"O.level before LayerNorm phase 1: "<<(*O[0]).l<<endl;
     cout<<"O.scale before LayerNorm phase 1: "<<(*O[0]).scale<<endl;
     // LayerNorm
     cuTimer.start();
     attention_scheme.LayerNorm_Bert(O, sk);
+    scheme.decrypt_display(sk, *O[0], "after LayerNorm");
+    scheme.decrypt_display(sk, *O[1], "after LayerNorm");
+    scheme.decrypt_display(sk, *O[2], "after LayerNorm");
     cout<<"O.level after LayerNorm phase 1: "<<(*O[0]).l<<endl;
     cout<<"O.scale after LayerNorm phase 1: "<<(*O[0]).scale<<endl;
     for (int i = 0; i < O.size(); i++){
@@ -185,7 +251,7 @@ void Bert::intermediate(vector<Ciphertext*> &O, int layer, vector<Ciphertext*> &
     encodingMatrix.EvalSlotsToCoeffs(encodingMatrix.m_U0PreFFT, *O[2]);
     pcmm_scheme.rlweCipherDecompose(*O[2], mlwe_cipher_buffer, 256, 512);
 
-    pcmm_scheme.PPMM(model_weights.intermediate_dense_weight[layer], mlwe_cipher_buffer, mat_M, mat_N, 128);
+    pcmm_scheme.PPMM(model_weights.intermediate_dense_weight[layer], mlwe_cipher_buffer, mat_M, mat_N, 128, 768);
 
     for (int i = 0; i < mat_M / 512; i++){
         pcmm_scheme.mlweCipherPacking(*res[2*i], mlwe_cipher_buffer, 512, i*512);
@@ -230,7 +296,7 @@ void Bert::layer_output(vector<Ciphertext*> &O, int layer, vector<Ciphertext*> &
         pcmm_scheme.rlweCipherDecompose(*O[i*2], mlwe_cipher_buffer, 512, i*512);
     }
 
-    pcmm_scheme.PPMM(model_weights.output_dense_weight[layer], mlwe_cipher_buffer, mat_M, mat_N, 128);
+    pcmm_scheme.PPMM(model_weights.output_dense_weight[layer], mlwe_cipher_buffer, mat_M, mat_N, 128, 3072);
 
     pcmm_scheme.mlweCipherPacking(*O[0], mlwe_cipher_buffer, 512, 0);
     pcmm_scheme.mlweCipherPacking(*O[2], mlwe_cipher_buffer, 256, 512);
@@ -265,6 +331,7 @@ void Bert::layer_output(vector<Ciphertext*> &O, int layer, vector<Ciphertext*> &
     cout << "layer_output pcmm time "  << cuTimer.stop() << endl;
     cuTimer.start();
     vector<Ciphertext*> LayerNorm_input = {O[0], O[1], O[2]};
+    // vector<Ciphertext*> LayerNorm_input = {layer_res[0], layer_res[1], layer_res[2]};
     
     cout << "before LayerNorm_phase1 LayerNorm_input[0] scale " << LayerNorm_input[0]->scale << endl;
     // LayerNorm
@@ -277,32 +344,310 @@ void Bert::layer_output(vector<Ciphertext*> &O, int layer, vector<Ciphertext*> &
     }
     cout << "layer_output LayerNorm time "  << cuTimer.stop() << endl;
     cout << "after LayerNorm_phase2 LayerNorm_input[0] scale " << LayerNorm_input[0]->scale << endl;
-
-    scheme.mulByiAndEqual(*LayerNorm_input[1]);
-    scheme.addAndEqual(*LayerNorm_input[0], *LayerNorm_input[1]);
-    *layer_res[0] = *LayerNorm_input[0];
-    *layer_res[1] = *LayerNorm_input[2];
-    encodingMatrix.EvalSlotsToCoeffs(encodingMatrix.m_U0PreFFT, *layer_res[0]);
-    encodingMatrix.EvalSlotsToCoeffs(encodingMatrix.m_U0PreFFT, *layer_res[1]);
+    // scheme.mulByiAndEqual(*LayerNorm_input[1]);
+    // scheme.addAndEqual(*LayerNorm_input[0], *LayerNorm_input[1]);
+    // *layer_res[0] = *LayerNorm_input[0];
+    // *layer_res[1] = *LayerNorm_input[2];
+    // encodingMatrix.EvalSlotsToCoeffs(encodingMatrix.m_U0PreFFT, *layer_res[0]);
+    // encodingMatrix.EvalSlotsToCoeffs(encodingMatrix.m_U0PreFFT, *layer_res[1]);
     
-    cout << "after layer_output LayerNorm and s2c level " << layer_res[0]->l << endl;
-    cout << "after layer scale " << layer_res[0]->scale << endl;
+    cout << "after layer_output LayerNorm and s2c level " << LayerNorm_input[0]->l << endl;
+    cout << "after layer scale " << LayerNorm_input[0]->scale << endl;
+    scheme.decrypt_display(sk, *(LayerNorm_input[0]), "after LayerNorm LayerNorm_input[0]");
+    scheme.decrypt_display(sk, *(LayerNorm_input[1]), "after LayerNorm LayerNorm_input[1]");
+    scheme.decrypt_display(sk, *(LayerNorm_input[2]), "after LayerNorm LayerNorm_input[2]");
 }
 
 void Bert::attn_mulV(vector<Ciphertext*> &S, vector<Ciphertext*> &V, vector<Ciphertext*> &O){
     for (int i = 0; i < V.size(); i++){
         attention_scheme.TauAndEqual(*V[i]);
         attention_scheme.CCMM_V(*S[2*i], *S[2*i+1], *V[i], *O[i]);
+        scheme.decrypt_display(sk, *O[i], "after CCMM_V O[i]");
     }
 }
 
 void Bert::boot(vector<Ciphertext*> &O){
     for (int i = 0; i < O.size(); i++){
+        // scheme.decrypt_display(sk, *O[i], "before bootstrap ");
+        // O[i] -> scale = 0.562950228e15;
         bootstrapper.Bootstrapping(*O[i]);
+        // O[i] -> scale = 0.4503601824e16;
+        // scheme.decrypt_display(sk, *O[i], "after bootstrap ");
     }
 }
 
 void Bert::PCMM_Boot_768_768(float* plain_mat, vector<Ciphertext*>& rlwe_cipher, vector<Ciphertext*>& res_cipher, int target_level, int do_s2c)
+{
+    int K = scheme.context.K;
+    int L = scheme.context.L;
+    int N = scheme.context.N;
+    
+    int N1 = pcmm_scheme.pcmm_context.N1;
+    int mlwe_rank = pcmm_scheme.pcmm_context.mlwe_rank;
+    int ringpack_p_count = pcmm_scheme.pcmm_context.ringpack_p_count;
+    int ringpack_q_count = pcmm_scheme.pcmm_context.ringpack_q_count;
+    int ringpack_pq_count = pcmm_scheme.pcmm_context.ringpack_pq_count;
+    
+    EncodingMatrix& encodingMatrix = bootstrapper.encodingMatrix;
+
+    if(do_s2c == 1){
+        *res_cipher[0] = *rlwe_cipher[0];
+        *res_cipher[1] = *rlwe_cipher[1];
+        *res_cipher[2] = *rlwe_cipher[2];
+        cout << "pcmm input level " << res_cipher[0]->l << endl;
+        
+        // scheme.mulByiAndEqual(*res_cipher[1]);
+        // scheme.addAndEqual(*res_cipher[0], *res_cipher[1]);
+
+        encodingMatrix.EvalSlotsToCoeffs(encodingMatrix.m_U0PreFFT, *res_cipher[0]);
+        pcmm_scheme.realData_coeffShift(*res_cipher[0], 0);
+        pcmm_scheme.rlweCipherDecompose(*res_cipher[0], mlwe_cipher_buffer, 256, 0);
+
+        encodingMatrix.EvalSlotsToCoeffs(encodingMatrix.m_U0PreFFT, *res_cipher[1]);
+        pcmm_scheme.realData_coeffShift(*res_cipher[1], 0);
+        pcmm_scheme.rlweCipherDecompose(*res_cipher[1], mlwe_cipher_buffer, 256, 256);
+
+        encodingMatrix.EvalSlotsToCoeffs(encodingMatrix.m_U0PreFFT, *res_cipher[2]);
+        pcmm_scheme.realData_coeffShift(*res_cipher[2], 0);
+        pcmm_scheme.rlweCipherDecompose(*res_cipher[2], mlwe_cipher_buffer, 256, 512);
+    }
+    else{
+        cout << "pcmm input level " << rlwe_cipher[0]->l << endl;
+        pcmm_scheme.rlweCipherDecompose(*rlwe_cipher[0], mlwe_cipher_buffer, 512, 0);
+        pcmm_scheme.rlweCipherDecompose(*rlwe_cipher[1], mlwe_cipher_buffer, 512, 512);
+    }
+    // for (int i = 0; i < 256; i++){
+    //     cudaMemset(mlwe_cipher_buffer[i+256+512]->cipher_device, 0, sizeof(uint64_tt) * PCMM_N1 * (q_ringpack_count) * (mlwe_rank + 1));
+    // }
+    
+    CUDATimer cuTimer;
+    cuTimer.start();
+    pcmm_scheme.PPMM(plain_mat, mlwe_cipher_buffer, 768, 768, 128, 768);
+    cout << "ppmm time "  << cuTimer.stop() << endl;
+    cout << "after ppmm scale: " << mlwe_cipher_buffer[0]->scale << endl;
+
+    // pcmm_scheme.mlweCipherPacking(*res_cipher[0], mlwe_cipher_buffer, 512, 0);
+
+    // pcmm_scheme.mlweCipherPacking(*res_cipher[2], mlwe_cipher_buffer, 512, 512);
+
+    // pcmm_scheme.realData_coeffShift(*res_cipher[0], 1, 1);
+    // pcmm_scheme.realData_coeffShift(*res_cipher[2], 1, 1);
+
+
+    // // // scheme.decrypt_display(scheme_algo.secretkey, cipher, "ctReal after stc ");
+	// // // Step 1: scale to q0/|m|
+    // // // q0 / message_ratio = q0 / 4.0 == input.scale
+	// // // Step 2 : Extend the basis from q to Q
+    // bootstrapper.modUpQ0toQL(*res_cipher[0], target_level);
+    // encodingMatrix.EvalCoeffsToSlots(encodingMatrix.m_U0hatTPreFFT, *res_cipher[0]);
+
+    // // real = a-bi
+    // scheme.conjugate_23(*bootstrapper.ctReal, *res_cipher[0]);
+    // // imag = cipher - real = 2bi
+    // scheme.sub(*bootstrapper.ctImag, *res_cipher[0], *bootstrapper.ctReal);
+    // // real = real + cipher = 2a
+    // scheme.addAndEqual(*bootstrapper.ctReal, *res_cipher[0]);
+    // scheme.divByiAndEqual(*bootstrapper.ctImag);
+    // bootstrapper.EvalModAndEqual(*bootstrapper.ctReal);
+    // bootstrapper.EvalModAndEqual(*bootstrapper.ctImag);
+
+    // scheme.multConstAndEqual(*bootstrapper.ctReal, 256./16*16);
+    // scheme.multConstAndEqual(*bootstrapper.ctImag, 256./16*16);
+
+    // *res_cipher[0] = *bootstrapper.ctReal;
+    // *res_cipher[1] = *bootstrapper.ctImag;
+
+
+    // bootstrapper.modUpQ0toQL(*res_cipher[2], target_level);
+
+    // encodingMatrix.EvalCoeffsToSlots(encodingMatrix.m_U0hatTPreFFT, *res_cipher[2]);
+
+    // scheme.conjugate_23(*bootstrapper.ctReal, *res_cipher[2]);
+    // scheme.addAndEqual(*res_cipher[2], *bootstrapper.ctReal);
+
+    // bootstrapper.EvalModAndEqual(*res_cipher[2]);
+    // scheme.multConstAndEqual(*res_cipher[2], 256./16*16);
+
+    pcmm_scheme.mlweCipherPacking(*res_cipher[0], mlwe_cipher_buffer, 256, 0);
+    pcmm_scheme.realData_coeffShift(*res_cipher[0], 1);
+    bootstrapper.modUpQ0toQL(*res_cipher[0], target_level);
+    encodingMatrix.EvalCoeffsToSlots(encodingMatrix.m_U0hatTPreFFT, *res_cipher[0]);
+    scheme.conjugate_23(*bootstrapper.ctReal, *res_cipher[0]);
+    scheme.addAndEqual(*res_cipher[0], *bootstrapper.ctReal);
+    bootstrapper.EvalModAndEqual(*res_cipher[0]);
+    scheme.multConstAndEqual(*res_cipher[0], 256./16*16);
+
+    pcmm_scheme.mlweCipherPacking(*res_cipher[1], mlwe_cipher_buffer, 256, 256);
+    pcmm_scheme.realData_coeffShift(*res_cipher[1], 1);
+    bootstrapper.modUpQ0toQL(*res_cipher[1], target_level);
+    encodingMatrix.EvalCoeffsToSlots(encodingMatrix.m_U0hatTPreFFT, *res_cipher[1]);
+    scheme.conjugate_23(*bootstrapper.ctReal, *res_cipher[1]);
+    scheme.addAndEqual(*res_cipher[1], *bootstrapper.ctReal);
+    bootstrapper.EvalModAndEqual(*res_cipher[1]);
+    scheme.multConstAndEqual(*res_cipher[1], 256./16*16);
+
+    pcmm_scheme.mlweCipherPacking(*res_cipher[2], mlwe_cipher_buffer, 256, 512);
+    pcmm_scheme.realData_coeffShift(*res_cipher[2], 1);
+    bootstrapper.modUpQ0toQL(*res_cipher[2], target_level);
+    encodingMatrix.EvalCoeffsToSlots(encodingMatrix.m_U0hatTPreFFT, *res_cipher[2]);
+    scheme.conjugate_23(*bootstrapper.ctReal, *res_cipher[2]);
+    scheme.addAndEqual(*res_cipher[2], *bootstrapper.ctReal);
+    bootstrapper.EvalModAndEqual(*res_cipher[2]);
+    scheme.multConstAndEqual(*res_cipher[2], 256./16*16);
+
+}
+
+void Bert::infer(vector<Ciphertext*> &encrypted_token){
+    Plaintext dec_test(context.N, context.L, context.L-3-9, slots, NTL::RR(context.precision));
+    cuDoubleComplex* complex_msg_dec_test;
+    cudaMalloc(&complex_msg_dec_test, sizeof(cuDoubleComplex) * slots);
+    cout << "begin infer" << endl;
+    cudaEvent_t start1, end1;
+    cudaEventCreate(&start1);
+    cudaEventCreate(&end1);
+    CUDATimer cuTimer1;
+    
+
+    float QKV = 10000, QmulK = 10000, softmax1 = 10000, boot_time = 10000, softmax2 = 10000, mulV = 10000;
+    float attn_output_time = 10000, intermediate_time = 10000, layer_output_time = 10000;
+    float temp1 = 0;
+    for (int i = 0; i < 3; i++){
+        *tmpcipher_buffer[i] = *encrypted_token[i];
+    }
+    
+    int layer = 0;
+    for (int layer = 0; layer < 1; layer++)
+    {
+        // QKV
+        vector<Ciphertext*> X = {tmpcipher_buffer[0], tmpcipher_buffer[1], tmpcipher_buffer[2]};
+        vector<Ciphertext*> Q = {tmpcipher_buffer[3], tmpcipher_buffer[4], tmpcipher_buffer[5]};
+        vector<Ciphertext*> K = {tmpcipher_buffer[6], tmpcipher_buffer[7], tmpcipher_buffer[8]};
+        vector<Ciphertext*> V = {tmpcipher_buffer[9], tmpcipher_buffer[10], tmpcipher_buffer[11]};
+        cout<<"X.level before qkv: "<<(*X[0]).l<<endl;
+        cout<<"X.scale before qkv: "<<(*X[0]).scale<<endl;
+        cout<<"Q.scale before qkv: "<<(*Q[0]).scale<<endl;
+        scheme.decrypt_display(sk, *X[0], "before mul_W_QKV *X[0]");
+        cudaEventRecord(start1);
+            mul_W_QKV(X, model_weights, Q, K, V, layer);
+
+        cudaEventRecord(end1);
+        cudaEventSynchronize(end1);
+        cudaEventElapsedTime(&temp1, start1, end1);
+        QKV = min(QKV, temp1);
+
+        // scheme.decrypt_display(sk, *Q[0], "after mul_W_QKV *Q[0]");
+        // scheme.decrypt_display(sk, *K[0], "after mul_W_QKV *K[0]");
+        // scheme.decrypt_display(sk, *V[0], "after mul_W_QKV *V[0]");
+        cout<<"Q.level after qkv: "<<(*Q[0]).l<<endl;
+
+        cout<<"Q.level before qk: "<<(*Q[0]).l<<endl;
+        cout<<"Q.scale before qk: "<<(*Q[0]).scale<<endl;
+        // Q*K^T
+        vector<Ciphertext*> O = {tmpcipher_buffer[0], tmpcipher_buffer[1], tmpcipher_buffer[2], tmpcipher_buffer[3], tmpcipher_buffer[4], tmpcipher_buffer[6]};
+        cudaEventRecord(start1);
+            attn_QK(Q, K, O);
+        cudaEventRecord(end1);
+        cudaEventSynchronize(end1);
+        cudaEventElapsedTime(&temp1, start1, end1);
+        QmulK = min(QmulK, temp1);
+        cout<<"O.level after qk: "<<(*O[0]).l<<endl;
+        cout<<"O.scale after qk: "<<(*O[0]).scale<<endl;
+        scheme.decrypt_display(sk, *O[0], "after attn_QK *O[0]");
+        scheme.decrypt_display(sk, *O[1], "after attn_QK *O[1]");
+        scheme.decrypt_display(sk, *O[2], "after attn_QK *O[2]");
+        scheme.decrypt_display(sk, *O[3], "after attn_QK *O[3]");
+        scheme.decrypt_display(sk, *O[4], "after attn_QK *O[4]");
+        scheme.decrypt_display(sk, *O[5], "after attn_QK *O[5]");
+        
+        cout<<"O.scale before attn_Softmax_phase1: "<<(*O[0]).scale<<endl;
+        cudaEventRecord(start1);
+            attn_Softmax_phase1(O);
+        cudaEventRecord(end1);
+        cudaEventSynchronize(end1);
+        cudaEventElapsedTime(&temp1, start1, end1);
+        softmax1 = min(softmax1, temp1);
+        cout<<"O.scale after attn_Softmax_phase1: "<<(*O[0]).scale<<endl;
+        
+        cout<<"O.level after softmax1: "<<(*O[0]).l<<endl;
+        scheme.decrypt_display(sk, *O[0], "before boot *O[0]");
+        cudaEventRecord(start1);
+            boot(O);
+        cudaEventRecord(end1);
+        cudaEventSynchronize(end1);
+        cudaEventElapsedTime(&temp1, start1, end1);
+        boot_time = min(boot_time, temp1);
+        
+        cout<<"O.scale before softmax2: "<<(*O[0]).scale<<endl;
+        cout<<"O.level before softmax2: "<<(*O[0]).l<<endl;
+        scheme.decrypt_display(sk, *O[0], "before attn_Softmax_phase2(after boot) *O[0]");
+
+        cudaEventRecord(start1);
+            attn_Softmax_phase2(O);
+        cudaEventRecord(end1);
+        cudaEventSynchronize(end1);
+        cudaEventElapsedTime(&temp1, start1, end1);
+        softmax2 = min(softmax2, temp1);
+        cout<<"O.scale after softmax2: "<<(*O[0]).scale<<endl;
+        
+        cout<<"O.level after softmax2: "<<(*O[0]).l<<endl;
+        vector <Ciphertext*> mulV_res = {tmpcipher_buffer[5], tmpcipher_buffer[7], tmpcipher_buffer[8]};
+        cout<<"O.level before mulV: "<<(*O[0]).l<<endl;
+        cout<<"V.level before mulV: "<<(*V[0]).l<<endl;
+        cout<<"O.scale before mulV: "<<(*O[0]).scale<<endl;
+        cout<<"V.scale before mulV: "<<(*V[0]).scale<<endl;
+        cudaEventRecord(start1);
+            attn_mulV(O, V, mulV_res);
+        cudaEventRecord(end1);
+        cudaEventSynchronize(end1);
+        cudaEventElapsedTime(&temp1, start1, end1);
+        mulV = min(mulV, temp1);
+
+        cout<<"mulV_res.level after mulV: "<<(*mulV_res[0]).l<<endl;
+        cout<<"mulV_res.scale after mulV: "<<(*mulV_res[0]).scale<<endl;
+        cudaEventRecord(start1);
+            attn_output(mulV_res,layer);
+        cudaEventRecord(end1);
+        cudaEventSynchronize(end1);
+        cudaEventElapsedTime(&temp1, start1, end1);
+        attn_output_time = min(attn_output_time, temp1);
+        scheme.decrypt_display(sk, *(mulV_res[0]), "after attn_output");
+        
+        vector <Ciphertext*> intermediate_res = {tmpcipher_buffer[2], tmpcipher_buffer[3], tmpcipher_buffer[4], tmpcipher_buffer[5], tmpcipher_buffer[6], tmpcipher_buffer[7],
+            tmpcipher_buffer[8], tmpcipher_buffer[9], tmpcipher_buffer[10], tmpcipher_buffer[11], tmpcipher_buffer[12], tmpcipher_buffer[13]};
+        cudaEventRecord(start1);
+            intermediate(mulV_res, layer, intermediate_res);
+        cudaEventRecord(end1);
+        cudaEventSynchronize(end1);
+        cudaEventElapsedTime(&temp1, start1, end1);
+        intermediate_time = min(intermediate_time, temp1);
+        
+        vector <Ciphertext*> layer_res = {tmpcipher_buffer[0], tmpcipher_buffer[1], tmpcipher_buffer[2]};
+        cudaEventRecord(start1);
+            layer_output(intermediate_res, layer, layer_res);
+        cudaEventRecord(end1);
+        cudaEventSynchronize(end1);
+        cudaEventElapsedTime(&temp1, start1, end1);
+        layer_output_time = min(layer_output_time, temp1);
+
+        cout << "\n\n\n\n\n" << endl;
+    }
+    printf("Time: QKV: %f ms\n", QKV);
+    printf("Time: QmulK: %f ms\n", QmulK);
+    printf("Time: softmax1: %f ms\n", softmax1);
+    printf("Time: boot_time: %f ms\n", boot_time);
+    printf("Time: softmax2: %f ms\n", softmax2);
+    printf("Time: mulV: %f ms\n", mulV);
+    printf("Time: attn_output_time: %f ms\n", attn_output_time);
+    printf("Time: intermediate_time: %f ms\n", intermediate_time);
+    printf("Time: layer_output_time: %f ms\n", layer_output_time);
+
+        
+
+
+}
+
+
+void Bert::test_PCMM_Boot_768_768(float* plain_mat, vector<Ciphertext*>& rlwe_cipher, vector<Ciphertext*>& res_cipher, int target_level, int do_s2c)
 {
     int K = scheme.context.K;
     int L = scheme.context.L;
@@ -329,9 +674,11 @@ void Bert::PCMM_Boot_768_768(float* plain_mat, vector<Ciphertext*>& rlwe_cipher,
         scheme.addAndEqual(*res_cipher[0], *res_cipher[1]);
 
         encodingMatrix.EvalSlotsToCoeffs(encodingMatrix.m_U0PreFFT, *res_cipher[0]);
+        pcmm_scheme.coeffBitRev(*res_cipher[0]);
         pcmm_scheme.rlweCipherDecompose(*res_cipher[0], mlwe_cipher_buffer, 512, 0);
 
         encodingMatrix.EvalSlotsToCoeffs(encodingMatrix.m_U0PreFFT, *res_cipher[2]);
+        pcmm_scheme.coeffBitRev(*res_cipher[2]);
         pcmm_scheme.rlweCipherDecompose(*res_cipher[2], mlwe_cipher_buffer, 256, 512);
     }
     else{
@@ -340,192 +687,21 @@ void Bert::PCMM_Boot_768_768(float* plain_mat, vector<Ciphertext*>& rlwe_cipher,
     }
     CUDATimer cuTimer;
     cuTimer.start();
-    
-    pcmm_scheme.PPMM(plain_mat, mlwe_cipher_buffer, 768, 768, 128);
+    pcmm_scheme.PPMM(plain_mat, mlwe_cipher_buffer, 768, 768, 128, 768);
     cout << "ppmm time "  << cuTimer.stop() << endl;
+    cout << "after ppmm scale: " << mlwe_cipher_buffer[0]->scale << endl;
 
     pcmm_scheme.mlweCipherPacking(*res_cipher[0], mlwe_cipher_buffer, 512, 0);
 
     pcmm_scheme.mlweCipherPacking(*res_cipher[2], mlwe_cipher_buffer, 256, 512);
-
-    // // scheme.decrypt_display(scheme_algo.secretkey, cipher, "ctReal after stc ");
-	// // Step 1: scale to q0/|m|
-    // // q0 / message_ratio = q0 / 4.0 == input.scale
-	// // Step 2 : Extend the basis from q to Q
-    bootstrapper.modUpQ0toQL(*res_cipher[0], target_level);
-
-    encodingMatrix.EvalCoeffsToSlots(encodingMatrix.m_U0hatTPreFFT, *res_cipher[0]);
-
-    // real = a-bi
-    scheme.conjugate_23(*bootstrapper.ctReal, *res_cipher[0]);
-
-    // imag = cipher - real = 2bi
-    scheme.sub(*bootstrapper.ctImag, *res_cipher[0], *bootstrapper.ctReal);
-    // real = real + cipher = 2a
-    scheme.addAndEqual(*bootstrapper.ctReal, *res_cipher[0]);
-
-    scheme.divByiAndEqual(*bootstrapper.ctImag);
-    bootstrapper.EvalModAndEqual(*bootstrapper.ctReal);
-    bootstrapper.EvalModAndEqual(*bootstrapper.ctImag);
-
-    scheme.multConstAndEqual(*bootstrapper.ctReal, 256./16*16);
-    scheme.multConstAndEqual(*bootstrapper.ctImag, 256./16*16);
-
-    *res_cipher[0] = *bootstrapper.ctReal;
-    *res_cipher[1] = *bootstrapper.ctImag;
-
-
-    bootstrapper.modUpQ0toQL(*res_cipher[2], target_level);
-    cout << "after modUpQ0toQL level " << res_cipher[2]->l << endl;
-    encodingMatrix.EvalCoeffsToSlots(encodingMatrix.m_U0hatTPreFFT, *res_cipher[2]);
-    bootstrapper.EvalModAndEqual(*res_cipher[2]);
-    cout << "after EvalModAndEqual level " << res_cipher[2]->l << endl;
-    scheme.multConstAndEqual(*res_cipher[2], 256./16*16);
-    cout << "after multConstAndEqual level " << res_cipher[2]->l << endl;
-
+    // Plaintext m1_dec(N, L, L, slots, NTL::RR(context.precision));
+    // double* decode_output;
+    // cudaMalloc(&decode_output, sizeof(double) * (1<<16));
+    // scheme.decryptMsg(m1_dec, sk, *res_cipher[0]);
+    // context.decode_coeffs(m1_dec, decode_output);
+    // print_device_array(decode_output, 1<<16, "c1");
     
-    // // Real part * 2
-    // scheme.addAndEqual(rlwe_cipher, *bootstrapper.ctReal);
-    // // // c1.l -= 4;
-    // bootstrapper.EvalModAndEqual(rlwe_cipher);
-
-    // scheme.multConstAndEqual(rlwe_cipher, 256./16*16);
-}
-
-void Bert::infer(vector<Ciphertext*> &encrypted_token){
-    cout << "begin infer" << endl;
-    cudaEvent_t start1, end1;
-    cudaEventCreate(&start1);
-    cudaEventCreate(&end1);
-    CUDATimer cuTimer1;
-    
-
-    float QKV = 10000, QmulK = 10000, softmax1 = 10000, boot_time = 10000, softmax2 = 10000, mulV = 10000;
-    float attn_output_time = 10000, intermediate_time = 10000, layer_output_time = 10000;
-    float temp1 = 0;
-    for (int i = 0; i < 2; i++){
-        *tmpcipher_buffer[i] = *encrypted_token[i];
-    }
-    
-    int layer = 0;
-    for (int layer = 0; layer < 12; layer++)
-    {
-        // QKV
-        vector<Ciphertext*> X = {tmpcipher_buffer[0], tmpcipher_buffer[1]};
-        vector<Ciphertext*> Q = {tmpcipher_buffer[2], tmpcipher_buffer[3], tmpcipher_buffer[4]};
-        vector<Ciphertext*> K = {tmpcipher_buffer[5], tmpcipher_buffer[6], tmpcipher_buffer[7]};
-        vector<Ciphertext*> V = {tmpcipher_buffer[8], tmpcipher_buffer[9], tmpcipher_buffer[10]};
-        cout<<"X.level before qkv: "<<(*X[0]).l<<endl;
-        // scheme.decrypt_display(sk, *X[0], "before mul_W_QKV *X[0]");
-        cudaEventRecord(start1);
-            mul_W_QKV(X, model_weights, Q, K, V, layer);
-        cudaEventRecord(end1);
-        cudaEventSynchronize(end1);
-        cudaEventElapsedTime(&temp1, start1, end1);
-        QKV = min(QKV, temp1);
-        // scheme.decrypt_display(sk, *Q[0], "after mul_W_QKV *Q[0]");
-        // scheme.decrypt_display(sk, *K[0], "after mul_W_QKV *K[0]");
-        // scheme.decrypt_display(sk, *V[0], "after mul_W_QKV *V[0]");
-        cout<<"Q.level after qkv: "<<(*Q[0]).l<<endl;
-
-        cout<<"Q.level before qk: "<<(*Q[0]).l<<endl;
-        cout<<"Q.scale before qk: "<<(*Q[0]).scale<<endl;
-        // Q*K^T
-        vector<Ciphertext*> O = {tmpcipher_buffer[0], tmpcipher_buffer[1], tmpcipher_buffer[2], tmpcipher_buffer[5], tmpcipher_buffer[3], tmpcipher_buffer[6]};
-        cudaEventRecord(start1);
-            attn_QK(Q, K, O);
-        cudaEventRecord(end1);
-        cudaEventSynchronize(end1);
-        cudaEventElapsedTime(&temp1, start1, end1);
-        QmulK = min(QmulK, temp1);
-        cout<<"O.level after qk: "<<(*O[0]).l<<endl;
-        cout<<"O.scale after qk: "<<(*O[0]).scale<<endl;
-        // scheme.decrypt_display(sk, *O[0], "after attn_QK *O[0]");
-        // scheme.decrypt_display(sk, *O[1], "after attn_QK *O[1]");
-        // scheme.decrypt_display(sk, *O[2], "after attn_QK *O[2]");
-        // scheme.decrypt_display(sk, *O[3], "after attn_QK *O[3]");
-        // scheme.decrypt_display(sk, *O[4], "after attn_QK *O[4]");
-        // scheme.decrypt_display(sk, *O[5], "after attn_QK *O[5]");
-        
-        cout<<"O.scale before attn_Softmax_phase1: "<<(*O[0]).scale<<endl;
-        cudaEventRecord(start1);
-            attn_Softmax_phase1(O);
-        cudaEventRecord(end1);
-        cudaEventSynchronize(end1);
-        cudaEventElapsedTime(&temp1, start1, end1);
-        softmax1 = min(softmax1, temp1);
-        cout<<"O.scale after attn_Softmax_phase1: "<<(*O[0]).scale<<endl;
-        
-        cout<<"O.level after softmax1: "<<(*O[0]).l<<endl;
-        cudaEventRecord(start1);
-            boot(O);
-        cudaEventRecord(end1);
-        cudaEventSynchronize(end1);
-        cudaEventElapsedTime(&temp1, start1, end1);
-        boot_time = min(boot_time, temp1);
-        
-        cout<<"O.scale before softmax2: "<<(*O[0]).scale<<endl;
-        cout<<"O.level before softmax2: "<<(*O[0]).l<<endl;
-        cudaEventRecord(start1);
-            attn_Softmax_phase2(O);
-        cudaEventRecord(end1);
-        cudaEventSynchronize(end1);
-        cudaEventElapsedTime(&temp1, start1, end1);
-        softmax2 = min(softmax2, temp1);
-        cout<<"O.scale after softmax2: "<<(*O[0]).scale<<endl;
-        
-        cout<<"O.level after softmax2: "<<(*O[0]).l<<endl;
-        vector <Ciphertext*> mulV_res = {tmpcipher_buffer[4], tmpcipher_buffer[7], tmpcipher_buffer[11]};
-        cout<<"O.level before mulV: "<<(*O[0]).l<<endl;
-        cout<<"V.level before mulV: "<<(*V[0]).l<<endl;
-        cout<<"O.scale before mulV: "<<(*O[0]).scale<<endl;
-        cout<<"V.scale before mulV: "<<(*V[0]).scale<<endl;
-        cudaEventRecord(start1);
-            attn_mulV(O, V, mulV_res);
-        cudaEventRecord(end1);
-        cudaEventSynchronize(end1);
-        cudaEventElapsedTime(&temp1, start1, end1);
-        mulV = min(mulV, temp1);
-
-        cout<<"mulV_res.level after mulV: "<<(*mulV_res[0]).l<<endl;
-        cout<<"mulV_res.scale after mulV: "<<(*mulV_res[0]).scale<<endl;
-        cudaEventRecord(start1);
-            attn_output(mulV_res,layer);
-        cudaEventRecord(end1);
-        cudaEventSynchronize(end1);
-        cudaEventElapsedTime(&temp1, start1, end1);
-        attn_output_time = min(attn_output_time, temp1);
-        
-        vector <Ciphertext*> intermediate_res = {tmpcipher_buffer[2], tmpcipher_buffer[3], tmpcipher_buffer[5], tmpcipher_buffer[6], tmpcipher_buffer[8], tmpcipher_buffer[9],
-            tmpcipher_buffer[10], tmpcipher_buffer[12], tmpcipher_buffer[13], tmpcipher_buffer[14], tmpcipher_buffer[15], tmpcipher_buffer[16]};
-        cudaEventRecord(start1);
-            intermediate(mulV_res, layer, intermediate_res);
-        cudaEventRecord(end1);
-        cudaEventSynchronize(end1);
-        cudaEventElapsedTime(&temp1, start1, end1);
-        intermediate_time = min(intermediate_time, temp1);
-        
-        vector <Ciphertext*> layer_res = {tmpcipher_buffer[0], tmpcipher_buffer[1]};
-        cudaEventRecord(start1);
-            layer_output(intermediate_res, layer, layer_res);
-        cudaEventRecord(end1);
-        cudaEventSynchronize(end1);
-        cudaEventElapsedTime(&temp1, start1, end1);
-        layer_output_time = min(layer_output_time, temp1);
-
-        cout << "\n\n\n\n\n" << endl;
-    }
-    printf("Time: QKV: %f ms\n", QKV);
-    printf("Time: QmulK: %f ms\n", QmulK);
-    printf("Time: softmax1: %f ms\n", softmax1);
-    printf("Time: boot_time: %f ms\n", boot_time);
-    printf("Time: softmax2: %f ms\n", softmax2);
-    printf("Time: mulV: %f ms\n", mulV);
-    printf("Time: attn_output_time: %f ms\n", attn_output_time);
-    printf("Time: intermediate_time: %f ms\n", intermediate_time);
-    printf("Time: layer_output_time: %f ms\n", layer_output_time);
-
-        
-
-
+    // scheme.decryptMsg(m1_dec, sk, *res_cipher[2]);
+    // context.decode_coeffs(m1_dec, decode_output);
+    // print_device_array(decode_output, 1<<16, "c2");
 }

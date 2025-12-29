@@ -16,7 +16,7 @@ void modUpPQtoT_23_kernel(uint64_tt* output, uint64_tt* input, uint32_tt n, int 
     // register int idx = idx_in_poly + blockIdx.y * t_num * n;
 
 	register uint64_tt rb[max_gamma_num] = {0};
-	register float vv = 0;
+	register double vv = 0;
 
 #pragma unroll
 	for(int i = 0; i < gamma && i + idx_in_block*gamma < p_num + l + 1; i++)
@@ -28,7 +28,7 @@ void modUpPQtoT_23_kernel(uint64_tt* output, uint64_tt* input, uint32_tt n, int 
 		register uint64_tt RiHatInvVecModRi_shoup = RiHatInvVecModRi_23_shoup_device[i + idx_in_block*gamma];
 		rb[i] = mulMod_shoup(ra, RiHatInvVecModRi, RiHatInvVecModRi_shoup, ri);
 
-		vv += float(rb[i]) / ri;
+		vv += double(rb[i]) / ri;
 	}
 
 	register int vv_floor = (int)vv;
@@ -92,7 +92,7 @@ void modUpQjtoT_23_kernel(uint64_tt* output, uint64_tt* input, uint32_tt n, int 
 	register int idx_in_block = blockIdx.y;
 
 	register uint64_tt rb[ebconv_padding_size][max_p_num] = {0}; // sizeof(rb) must > gamma
-	register float vv[ebconv_padding_size] = {0};
+	register double vv[ebconv_padding_size] = {0};
 
 #pragma unroll
 	for(int j = 0; j < p_num && j + idx_in_block*p_num < l+1; j++)
@@ -110,11 +110,11 @@ void modUpQjtoT_23_kernel(uint64_tt* output, uint64_tt* input, uint32_tt n, int 
 			register uint64_tt ra = input[blockIdx.x*q_num*n + idx_in_pq*n + idx_in_poly + iter*gridDim.z*blockDim.x];
 			rb[iter][j] = mulMod_shoup(ra, QjHatInvVecModQj, QjHatInvVecModQj_shoup, qi);
 			
-			float rr = (float)(rb[iter][j]);
-			vv[iter] += rr / (float)(qi);
+			double rr = (double)(rb[iter][j]);
+			vv[iter] += rr / (double)(qi);
 		}
-		// float rr = (float)(rb[j]);
-		// vv += rr / (float)(qi);
+		// double rr = (double)(rb[j]);
+		// vv += rr / (double)(qi);
 	}
 
 	// register int vv_floor = (int)vv;
@@ -192,7 +192,7 @@ void modUpTtoPQl_23_kernel(uint64_tt* modUp_TtoQj_buffer, uint64_tt* exProduct_T
 	register int idx_in_cipher = blockIdx.x;
 
 	register uint64_tt rb[max_tnum]; // sizeof(rb) must > t_num
-	register float vv = 0;
+	register double vv = 0;
 
 #pragma unroll
 	for(int i = 0; i < t_num; i++)
@@ -206,8 +206,8 @@ void modUpTtoPQl_23_kernel(uint64_tt* modUp_TtoQj_buffer, uint64_tt* exProduct_T
 		register uint64_tt THatInvVecModti_shoup = THatInvVecModti_23_shoup_device[i];
 		rb[i] = mulMod_shoup(ra, THatInvVecModti, THatInvVecModti_shoup, t);
 
-		float rr = (float)(rb[i]);
-		vv += rr / (float)(t);
+		double rr = (double)(rb[i]);
+		vv += rr / (double)(t);
 	}
 
 	register int vv_floor = (int)vv;
@@ -295,7 +295,7 @@ __global__ void modDownPQltoQl_23_multi_kernel(uint64_tt* output, uint64_tt* inp
 
 	register uint128_tt acc;
 
-	// register float vv = 0;
+	// register double vv = 0;
 
 #pragma unroll
 	for(int i = 0; i < p_num; i++)
@@ -308,7 +308,7 @@ __global__ void modDownPQltoQl_23_multi_kernel(uint64_tt* output, uint64_tt* inp
 
 		register uint64_tt rb = mulMod_shoup(ra, pHatInvVecModp, pHatInvVecModp_shoup, pi);
 
-		// vv += float(rb) / pi;
+		// vv += double(rb) / pi;
 
 		register uint64_tt pHatVecModq = pHatVecModq_23_device[idx_in_pq*p_num + i];
 

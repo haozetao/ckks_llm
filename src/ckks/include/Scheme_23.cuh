@@ -226,7 +226,7 @@ void Scheme_23::multConstAndEqual(Ciphertext& cipher, double cnst)
     }
     for(int i = 0; i < cipher.l+1; i++)
     {
-        add_const_copy_vec[i] = scaled_cnst % context.qVec[i];
+        add_const_copy_vec[i] ·= scaled_cnst % context.qVec[i];
         add_const_copy_vec[i + 2*(L+1)] = x_Shoup(add_const_copy_vec[i], context.qVec[i]);
     }
     cudaMemcpy(add_const_buffer, add_const_copy_vec.data(), sizeof(uint64_tt) * add_const_copy_vec.size(), cudaMemcpyHostToDevice);
@@ -497,9 +497,9 @@ void Scheme_23::decrypt_display(SecretKey& sk, Ciphertext& cipher, char* s, int 
     cudaMemcpy(array_PQ, context.encode_buffer, sizeof(cuDoubleComplex) * slots, cudaMemcpyDeviceToHost);
     printf("%s = [", s);
     double max_value = 0;
-    for(int i = 0; i < 8; i++)
+    for(int i = 0; i < slots; i++)
     {
-        printf("%.8lf + %.8f*i, ", array_PQ[i].x, array_PQ[i].y);
+        if (i < 8)printf("%.8lf + %.8f*i, ", array_PQ[i].x, array_PQ[i].y);
         // if(i % row_num == row_num - 1) printf("\n");
         max_value = max(max_value, array_PQ[i].x);
     }

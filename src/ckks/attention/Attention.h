@@ -10,8 +10,9 @@ public:
     Context_23& context;
     Scheme_23& scheme;
     SchemeAlgo& scheme_algo;
+    SecretKey& sk;
     
-    Attention(Context_23& context, Scheme_23& scheme, SchemeAlgo& scheme_algo, int token_len, int head_num, int d);
+    Attention(Context_23& context, Scheme_23& scheme, SchemeAlgo& scheme_algo, int token_len, int head_num, int d, SecretKey& sk);
 
     vector<double> exp_cheby_coeffs;
     vector<Chebyshev_Polynomial*> exp_cheby_poly_pool;
@@ -41,6 +42,7 @@ public:
     /********************************Single-Input Non-Linear Functions*******************************/
     // Exponential function: exp(x) = e^x
     void evalExp(Ciphertext& cipher);
+    void evalExp_iter(Ciphertext& cipher, int iter);
 
     // CDF function: 0.5 * (1 + erf(x / sqrt(2)))
     void evalCDF(Ciphertext& cipher);
@@ -65,8 +67,10 @@ public:
     // SoftMax function: exp(x_i) / sum(exp(x_j))
     void evalSoftMax(vector<Ciphertext*>& cipher_P);
     void evalSoftMax_phase1(vector<Ciphertext*>& cipher_P);
-    void evalSoftMax_phase2(vector<Ciphertext*>& cipher_P);
-
+    void evalSoftMax_phase2(vector<Ciphertext*>& cipher_P, SecretKey& sk);
+    void evalSoftMax_phase1_mul_sqrtd(vector<Ciphertext*>& cipher_P);
+    void evalSoftMax_phase1_iter(vector<Ciphertext*>& cipher_P, int iter);
+    void FASHE_evalSoftMax(vector<Ciphertext*>& cipher_P, SecretKey& sk);
 
     // Layer Normalization: normalize each row of the matrix
     void LayerNorm(vector<Ciphertext*>& cipher, SecretKey& sk);

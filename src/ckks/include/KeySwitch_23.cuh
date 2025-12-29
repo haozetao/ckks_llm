@@ -118,8 +118,9 @@ void Scheme_23::addConjKey_23(SecretKey &secretKey, cudaStream_t steam)
  */
 void Scheme_23::addLeftRotKey_23(SecretKey &secretkey, long rot_num, cudaStream_t stream)
 {
-    if (rotKey_vec_23[rot_num] != nullptr)
+    if (rotKey_vec_23[rot_num] != nullptr){
         return;
+    }
     int N = context.N;
     int L = context.L;
     int K = context.K;

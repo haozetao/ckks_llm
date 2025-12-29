@@ -4,14 +4,15 @@
 #include "../include/advanced/SchemeAlgo.cuh"
 #include "../include/TimeUtils.cuh"
 
-Attention::Attention(Context_23& context, Scheme_23& scheme, SchemeAlgo& scheme_algo, int token_len, int head_num, int d)
-    : context(context), scheme(scheme), scheme_algo(scheme_algo), token_len(token_len), head_num(head_num), d(d)
+Attention::Attention(Context_23& context, Scheme_23& scheme, SchemeAlgo& scheme_algo, int token_len, int head_num, int d, SecretKey& sk)
+    : context(context), scheme(scheme), scheme_algo(scheme_algo), token_len(token_len), head_num(head_num), d(d), sk(sk)
 {
     // exp(5(x-1)) 
     // x \in [-1, 1] -> [-10, 0]
-    exp_cheby_coeffs = {0.18354092959380028, 0.32794453388908545, 0.23590404563197528, 0.13922148455874572, 
-        0.0688382641622435, 0.029080636255965363, 0.010676991703074352, 0.003456418101541191, 
-        0.0009990240054485726, 0.0002603107017095204, 6.204105467877648e-05, 1.391652806979088e-05};
+    exp_cheby_coeffs = {0.18354081267894184, 0.32794453388908446, 0.23590381180224984, 0.1392214845586662, 
+        0.06883803033185001, 0.029080636250469596, 0.01067675783091106, 0.0034564177904279412, 
+        0.000998788017712841, 0.0002602965792747787, 6.172033233564635e-05, 1.3415806954468434e-05,
+         2.6907827538706158e-06, 5.007266909759075e-07, 8.707430942944683e-08, 1.4433549381509271e-08};
     int exp_tree_node_num = 1<<int(ceil(log2(exp_cheby_coeffs.size())));
     for(int i = 0; i < exp_tree_node_num; i++)
     {
@@ -131,7 +132,7 @@ Attention::Attention(Context_23& context, Scheme_23& scheme, SchemeAlgo& scheme_
     // prepare mask for CCMM Q*K^T
     cout<<"prepare Q*K^T mask"<<endl;
     for(int i = 1; i < d; i<<=1){
-        Plaintext* mask_i = new Plaintext(N, L, L, slots, NTL::RR(pow(context.precision, 0.6666)));
+        Plaintext* mask_i = new Plaintext(N, L, L, slots, NTL::RR(pow(context.precision, 2.0/3)));
         // Plaintext* mask_i = new Plaintext(N, L, L, slots, NTL::RR(context.precision));
         column_mask_ccmm.push_back(mask_i);
 
@@ -292,6 +293,23 @@ void Attention::evalExp(Ciphertext& cipher)
     scheme_algo.evalPolynomialChebyshev(cipher, target_scale, exp_cheby_poly_pool);
 }
 
+void Attention::evalExp_iter(Ciphertext& cipher, int iter)
+{
+    scheme.multConstAndEqual(cipher, 1./softmax_x_max/(1<<iter));
+    scheme.rescaleAndEqual(cipher);
+    scheme.addConstAndEqual(cipher, 1);
+
+    NTL::RR target_scale = cipher.scale;
+
+    // First mapping: x \in [-10, 0] -> [-1, 1]
+    // Evaluate the Chebyshev polynomial for exp(5(x-1))
+    scheme_algo.evalPolynomialChebyshev(cipher, target_scale, exp_cheby_poly_pool);
+    for (int i = 0; i < iter; i++){
+        scheme.multAndEqual_23(cipher, cipher);
+        scheme.rescaleAndEqual(cipher);
+    }
+}
+
 // CDF function: 0.5 * (1 + erf(x / sqrt(2)))
 void Attention::evalCDF(Ciphertext& cipher)
 {
@@ -357,7 +375,7 @@ void Attention::evalInv(Ciphertext& cipher, double upper_bound)
     // b = (2 - k0*a)
     ax->scale = ax->scale / K_inv[0];
     scheme.constSub(*bx, *ax, 2);
-    cout << "after scheme.constSub(*bx, *ax, 2); bx->scale = " << bx->scale << endl;
+    // cout << "after scheme.constSub(*bx, *ax, 2); bx->scale = " << bx->scale << endl;
     ax->scale = ax->scale * K_inv[0];
     // a = a * (2 - k0*a)
     scheme.multAndEqual_23(*ax, *bx);
@@ -365,9 +383,9 @@ void Attention::evalInv(Ciphertext& cipher, double upper_bound)
     // a = k0 * a * (2 - k0*a)
     ax->scale = ax->scale / K_inv[0];
     // b = k0 * b * (2 - k0*a)
-    cout << "before bx->scale = bx->scale / K_inv[0]; bx->scale = " << bx->scale << endl;
+    // cout << "before bx->scale = bx->scale / K_inv[0]; bx->scale = " << bx->scale << endl;
     bx->scale = bx->scale / K_inv[0];
-    cout << "after bx->scale = bx->scale / K_inv[0]; bx->scale = " << bx->scale << endl;
+    // cout << "after bx->scale = bx->scale / K_inv[0]; bx->scale = " << bx->scale << endl;
 
     for(int i = 1; i < K_inv.size(); i++){
         // temp = (2 - k0*a)
@@ -380,26 +398,26 @@ void Attention::evalInv(Ciphertext& cipher, double upper_bound)
         scheme.rescaleAndEqual(*ax);
         // a = k0 * a * (2 - k0*a)
         ax->scale = ax->scale / K_inv[i];
-        cout << "before scheme.multAndEqual_23(*bx, *temp); bx->scale = " << bx->scale << endl;
-        cout << "before scheme.multAndEqual_23(*bx, *temp); temp->scale = " << temp->scale << endl;
+        // cout << "before scheme.multAndEqual_23(*bx, *temp); bx->scale = " << bx->scale << endl;
+        // cout << "before scheme.multAndEqual_23(*bx, *temp); temp->scale = " << temp->scale << endl;
         // b = k0 * b * (2 - k0*a)
         scheme.multAndEqual_23(*bx, *temp);
         scheme.rescaleAndEqual(*bx);
-        cout << "after scheme.multAndEqual_23(*bx, *temp); bx->scale = " << bx->scale << endl;
+        // cout << "after scheme.multAndEqual_23(*bx, *temp); bx->scale = " << bx->scale << endl;
         bx->scale = bx->scale / K_inv[i];
-        cout << "after bx->scale = bx->scale / K_inv[i]; bx->scale = " << bx->scale << endl;
+        // cout << "after bx->scale = bx->scale / K_inv[i]; bx->scale = " << bx->scale << endl;
     }
-    cout << "target_scale = " << target_scale << endl;
-    cout << "bx->scale = " << bx->scale << endl;
-    cout << "upper_bound = " << upper_bound << endl;
+    // cout << "target_scale = " << target_scale << endl;
+    // cout << "bx->scale = " << bx->scale << endl;
+    // cout << "upper_bound = " << upper_bound << endl;
     double tt = to_double(target_scale / bx->scale / upper_bound);
     bx->scale *= target_scale / bx->scale;
-    cout << "after bx->scale *= target_scale / bx->scale; bx->scale = " << bx->scale << endl;
-    cout << "tt = " << tt << endl;
+    // cout << "after bx->scale *= target_scale / bx->scale; bx->scale = " << bx->scale << endl;
+    // cout << "tt = " << tt << endl;
     scheme.multConstAndEqual(*bx, tt);
-    cout << "bx->scale = " << bx->scale << endl;
+    // cout << "bx->scale = " << bx->scale << endl;
     scheme.rescaleAndEqual(*bx);
-    cout << "bx->scale = " << bx->scale << endl;
+    // cout << "bx->scale = " << bx->scale << endl;
     cipher = *bx;
 }
 
@@ -572,6 +590,89 @@ void Attention::evalSoftMax(vector<Ciphertext*>& cipher_P)
     }
 }
 
+// use Fast and Accurate Homomorphic Softmax Evaluation method
+void Attention::FASHE_evalSoftMax(vector<Ciphertext*>& cipher_P, SecretKey& sk)
+{
+    int iter_time = 2;
+    double lambda_y[2] = {20.1};
+    if(cipher_P.size() != token_len / d){
+        printf("Error: cipher_P size must be equal to token_len / d\n");
+        return;
+    }
+    for(int i = 0; i < token_len / d; i++){
+        scheme.addConstAndEqual(*cipher_P[i], -(softmax_x_max*(1<<iter_time)));
+        scheme.multConstAndEqual(*cipher_P[i], 1./softmax_x_max/(1<<iter_time));
+        scheme.rescaleAndEqual(*cipher_P[i]);
+        scheme.addConstAndEqual(*cipher_P[i], 1);
+
+        NTL::RR target_scale = (*cipher_P[i]).scale;
+
+        scheme_algo.evalPolynomialChebyshev(*cipher_P[i], target_scale, exp_cheby_poly_pool);
+    }
+    scheme.decrypt_display(sk, *cipher_P[0], "After exp:");
+    for(int i = 0; i < token_len / d; i++){
+        for (int t = 0; t < iter_time; t++){
+            if (t < iter_time - 1 ){
+                // mul lambda and then square
+                scheme.multConstAndEqual(*cipher_P[i], lambda_y[t]);
+                scheme.rescaleAndEqual(*cipher_P[i]);
+                scheme.multAndEqual_23(*cipher_P[i], *cipher_P[i]);
+                scheme.rescaleAndEqual(*cipher_P[i]);
+                scheme.decrypt_display(sk, *cipher_P[i], "After mul lambda and square:");
+            }
+            else {
+                *nonlieanr_buffer[1] = *cipher_P[i];
+                scheme.multAndEqual_23(*nonlieanr_buffer[1], *nonlieanr_buffer[1]);
+                scheme.rescaleAndEqual(*nonlieanr_buffer[1]);
+                // reduce sum and repeat
+                // reduce sum
+                for(int j = log2(d) - 1; j >= 0; j--){
+                    scheme.leftRotateAddSelf_23(*nonlieanr_buffer[1], 1 << j);
+                    // printf("reduce sum id: %d\n", 1<<i);
+                }
+                scheme.multConstAndEqual(*nonlieanr_buffer[1], *column_mask_reduce[0]);
+                scheme.rescaleAndEqual(*nonlieanr_buffer[1]);
+
+                // repeate
+                for(int j = 0; j < log2(d); j++){
+                    scheme.leftRotateAddSelf_23(*nonlieanr_buffer[1], 32768 - (1 << j));
+                }
+                if(i == 0){
+                    *nonlieanr_buffer[0] = *nonlieanr_buffer[1];
+                } else {
+                    scheme.addAndEqual(*nonlieanr_buffer[0], *nonlieanr_buffer[1]);
+                }
+            }
+        }
+    }
+    scheme.decrypt_display(sk, *nonlieanr_buffer[0], "Sum before inv:");
+    evalSqrtInv(*nonlieanr_buffer[0], sk, 1.1);
+    scheme.decrypt_display(sk, *nonlieanr_buffer[0], "After inv:");
+    for(int i = 0; i < token_len / d; i++){
+        scheme.decrypt_display(sk, *cipher_P[i], "Before final mult:");
+        scheme.multAndEqual_23(*cipher_P[i], *nonlieanr_buffer[0]);
+        scheme.rescaleAndEqual(*cipher_P[i]);
+        scheme.decrypt_display(sk, *cipher_P[i], "After final mult:");
+        scheme.multAndEqual_23(*cipher_P[i], *cipher_P[i]);
+        scheme.rescaleAndEqual(*cipher_P[i]);
+    }
+}
+
+void Attention::evalSoftMax_phase1_iter(vector<Ciphertext*>& cipher_P, int iter)
+{
+    cout << "level at begin " << (*cipher_P[0]).l << endl;
+    if(cipher_P.size() != token_len / d){
+        printf("Error: cipher_P size must be equal to token_len / d\n");
+        return;
+    }
+
+    for(int i = 0; i < token_len / d; i++){
+        scheme.addConstAndEqual(*cipher_P[i], -(softmax_x_max*(1<<iter)));
+        evalExp_iter(*cipher_P[i], iter);
+        // Bootstrapping here
+    }
+}
+
 void Attention::evalSoftMax_phase1(vector<Ciphertext*>& cipher_P)
 {
     cout << "level at begin " << (*cipher_P[0]).l << endl;
@@ -587,7 +688,32 @@ void Attention::evalSoftMax_phase1(vector<Ciphertext*>& cipher_P)
     }
 }
 
-void Attention::evalSoftMax_phase2(vector<Ciphertext*>& cipher_P)
+void Attention::evalSoftMax_phase1_mul_sqrtd(vector<Ciphertext*>& cipher_P)
+{
+    cout << "level at begin " << (*cipher_P[0]).l << endl;
+    if(cipher_P.size() != token_len / d){
+        printf("Error: cipher_P size must be equal to token_len / d\n");
+        return;
+    }
+
+    for(int i = 0; i < token_len / d; i++){
+        // scheme.addConstAndEqual(*cipher_P[i], -softmax_x_max);
+        // scheme.multConstAndEqual(*cipher_P[i], 1./softmax_x_max);
+        scheme.multConstAndEqual(*cipher_P[i], 1./softmax_x_max/sqrt(d));
+        scheme.addConstAndEqual(*cipher_P[i], -1);
+        scheme.rescaleAndEqual(*cipher_P[i]);
+        scheme.addConstAndEqual(*cipher_P[i], 1);
+
+        NTL::RR target_scale = (*cipher_P[i]).scale;
+
+        // First mapping: x \in [-10, 0] -> [-1, 1]
+        // Evaluate the Chebyshev polynomial for exp(5(x-1))
+        scheme_algo.evalPolynomialChebyshev(*cipher_P[i], target_scale, exp_cheby_poly_pool);
+        // Bootstrapping here
+    }
+}
+
+void Attention::evalSoftMax_phase2(vector<Ciphertext*>& cipher_P, SecretKey& sk)
 {
     for(int i = 0; i < token_len / d; i++){
         *nonlieanr_buffer[1] = *cipher_P[i];
@@ -612,8 +738,9 @@ void Attention::evalSoftMax_phase2(vector<Ciphertext*>& cipher_P)
         }
     }
     cout << "before evalInv (*nonlieanr_buffer[0]).scale " << (*nonlieanr_buffer[0]).scale << endl;
+    scheme.decrypt_display(sk, *nonlieanr_buffer[0], "Sum before inv:");
     // sum{exp(x)} < n / 4 ??
-    evalInv(*nonlieanr_buffer[0], token_len / 4);
+    evalInv(*nonlieanr_buffer[0], 1);
     cout << "after evalInv (*nonlieanr_buffer[0]).scale " << (*nonlieanr_buffer[0]).scale << endl;
     cout << "after evalInv (*cipher_P[0]).scale " << (*cipher_P[0]).scale << endl;
     for(int i = 0; i < token_len / d; i++){
@@ -722,7 +849,7 @@ void Attention::LayerNorm_Bert(vector<Ciphertext*>& cipher, SecretKey& sk)
         else scheme.addAndEqual(*sum_x, *cipher[i]);
     }
     cout << "LayerNorm_Bert after sum_x scale " << sum_x->scale << endl;
-    // scheme.decrypt_display(sk, *sum_x, "compute sum_x");
+    
 
     // reduce sum and repeat
     // reduce sum
@@ -733,12 +860,13 @@ void Attention::LayerNorm_Bert(vector<Ciphertext*>& cipher, SecretKey& sk)
     scheme.multConstAndEqual(*sum_x, *column_mask_reduce[1]);
     scheme.rescaleAndEqual(*sum_x);
     cout << "LayerNorm_Bert after reduce sum scale " << sum_x->scale << endl;
+    scheme.decrypt_display(sk, *sum_x, "compute sum_x");
 
     // repeate
     for(int j = 0; j < log2(column_num); j++){
         scheme.leftRotateAddSelf_23(*sum_x, 32768 - (1 << j));
     }
-    // scheme.decrypt_display(sk, *sum_x, "repeate");
+    scheme.decrypt_display(sk, *sum_x, "repeate");
 
     // compute n*x
     for (int i = 0; i < cipher.size(); i++){
@@ -748,6 +876,7 @@ void Attention::LayerNorm_Bert(vector<Ciphertext*>& cipher, SecretKey& sk)
     for (int i = 0; i < cipher.size(); i++){
         scheme.subAndEqual(*cipher[i], *sum_x);
     }
+    scheme.decrypt_display(sk, *cipher[0], "-sum_x");
     // square
     for (int i = 0; i < cipher.size(); i++){
         *tmp_cipher[i] = *cipher[i];
@@ -781,10 +910,12 @@ void Attention::LayerNorm_Bert(vector<Ciphertext*>& cipher, SecretKey& sk)
     // scheme.addConstAndEqual(*sum_x, 1e-5);
 
     cout << "LayerNorm_Bert before sqrtInv sum_x scale " << sum_x->scale << endl;
+    scheme.decrypt_display(sk, *sum_x, "before SqrtInv");
     // evalSqrtInv
-    evalSqrtInv_without_mul_tt(*sum_x, sk, 10000);
+    evalSqrtInv_without_mul_tt(*sum_x, sk, 2e+06);
     cout << "LayerNorm_Bert after sqrtInv sum_x scale " << sum_x->scale << endl;
     cout << "LayerNorm_Bert after sqrtInv cipher[0] scale " << cipher[0]->scale << endl;
+    scheme.decrypt_display(sk, *sum_x, "after SqrtInv");
 
     // mul
     for (int i = 0; i < cipher.size(); i++){
@@ -840,13 +971,12 @@ void Attention::Recursive_CCMM_reduce(Ciphertext& Q, Ciphertext& K, int layer, i
         scheme.multConstAndEqual(**cipher_stack, *column_mask_ccmm[(seq & 1)]);
         // cout << "after mult " << (**cipher_stack).scale << endl;
         if((**cipher_stack).scale > need_rescale)scheme.rescaleAndEqual(**cipher_stack);
-        // scheme.decrypt_display(sk, *target_cipher, "after mask");
         return;
     }
     Recursive_CCMM_reduce(Q, K, layer + 1, max_layer, seq * 2, column_num, cipher_stack);
     Recursive_CCMM_reduce(Q, K, layer + 1, max_layer, seq * 2 + 1, column_num, cipher_stack+1);
     scheme.addAndEqual(**cipher_stack, **(cipher_stack+1));
-    // if (layer == max_layer - 1)scheme.decrypt_display(sk, *target_cipher, "target_cipher");
+    // if (layer == 5) scheme.decrypt_display(sk, **cipher_stack, "");
     if (layer > 0){
         if (seq & 1) leftRotateAddSelf_23(**cipher_stack, 32768 - (1 << (max_layer - layer)));
         else leftRotateAddSelf_23(**cipher_stack, (1 << (max_layer - layer)));
