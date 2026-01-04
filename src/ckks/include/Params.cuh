@@ -55,60 +55,29 @@ void Context_23::getPrimeCKKS(int hamming_weight)
 		break;
 
 	case 15:
-        precision = 0x1000000000; // 1 << 36
+        precision = 1L<<49; // 1 << 36
 
         qVec = {
-			// 0x1004d40001,
-			// 0x3004d80001,
-			0x4001b00001, 0xffff00001, 0xfff700001, 0xfff100001, 
-			0x1000500001, 0x1001d00001, 0x1002300001, 0x1002700001, 
-			0xffdf00001, 0xffc300001, 0xffbe00001, 0xffbb00001, 
-			0x1002c00001, 0x1003600001, 0x1003900001, 0x1003e00001, 
-
-			0x1004700001, 0x1004d00001, 0x1005100001, 0x1006900001, 
-			0xffa300001, 0xff7900001, 0xff6a00001, 0xff5700001, 
-			0xff3d00001, 0xff3c00001, 0xff3a00001, 0xff3900001,
-			// 0x1007400001, 0x1008700001, 0x1008d00001, 0x1009300001, 
-
-			
-			// 0x20000018e0001, 0x2000001c00001, 0x2000001ca0001, 0x2000001d20001, 
-			// 0x1fffffee80001, 0x1fffffede0001, 0x1fffffec40001, 0x1fffffe780001, 
-			// 0x2000000ce0001, 0x20000013a0001, 0x20000013c0001, 0x20000015a0001, 
+			0x20000018e0001, 0x2000001c00001, 0x2000001ca0001, 0x2000001d20001, 
+			0x1fffffee80001, 0x1fffffede0001, 0x1fffffec40001, 0x1fffffe780001, 
+			0x2000000ce0001, 0x20000013a0001, 0x20000013c0001, 0x20000015a0001, 
 			
 			// 0x1ffffffea0001, 0x1ffffffd40001, 0x1ffffffba0001, 0x1ffffffb40001, 
 			// 0x20000001a0001, 0x20000005e0001, 0x2000000860001, 0x2000000b00001, 
 			// 0x1ffffffb00001, 0x1ffffffa20001, 0x1ffffff780001, 0x1ffffff5c0001, 
 			// 0x1fffffe5a0001, 0x1fffffe480001, 0x1fffffde80001, 0x1fffffde20001,
-			// 0xff3300001, 0xff2d00001, 0xff2800001, 0xff1f00001,
         };
 		pVec = { // 36 x 6
-            // 0x10a19000001, 0x10a3b000001, 0x10a83000001, 0x10b0a000001,
-			// 0x10b2e000001, 0x10bc1000001,
-			0x10a19000001, 0x10a3b000001, 0x10a83000001, 0x1000b40001,
-			// 0x1000f60001, 0x10011a0001, 0x1001220001
-			// 0x2000001d60001, 0x2000001e80001, 0x2000002020001, 0x2000002260001, 
+			0x2000002600001, 0x20000027e0001, 0x2000002800001, 0x20000029e0001, 
+
 		};
 		tVec = { // 60 x 8
 			0xffffffffffc0001, 0xfffffffff840001,
 			0xfffffffff6a0001, 0xfffffffff5a0001,
 			0xfffffffff2a0001, 0xfffffffff240001,
-			0xffffffffefe0001, 0xffffffffeca0001,
-
-			0xffffffffd2a0001, 0xffffffffbf20001,
-			// 0xffffffff1fe0001,
-			// 0x7ffffffffcc0001, 0x7ffffffffba0001,
-			// 0x7ffffffffb00001, 0x7ffffffff320001,
-			// 0x7ffffffff2c0001, 0x7ffffffff240001,
-			// 0x7fffffffefa0001, 0x7fffffffede0001,
-			
-			// 0x7fffffffe900001, 0x7fffffffe3c0001,
-			// 0x2ffffffee0001,0x2ffffffe00001,0x2ffffffd60001,0x2ffffffa40001,
-			// 0x2ffffff6a0001,0x2ffffff620001,0x2fffffefc0001,0x2fffffef60001,
-			// 0xfffffffa0001, 0xfffffff00001, 0xffffffde0001, 0xffffff6a0001,
-			// 0xffffff280001, 0xffffff060001, 0xfffffed60001, 0xfffffebc0001,
-			// 0xfffffe8e0001,
+			0xffffffffefe0001, // 0xffffffffeca0001,
 		};
-        gamma = 8;
+        gamma = 4;
 		// len(P) stands for r, len(T) stands for r', gamma stands for tilde_r
 		break;
 

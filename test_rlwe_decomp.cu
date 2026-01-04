@@ -41,13 +41,13 @@ int main(int argc, char* argv[])
     SecretKey sk(context);
 
     SchemeAlgo scheme_algo(context, scheme, sk);
-    EncodingMatrix encodingMatrix(sk, scheme, 4, 4, 1);
-    Bootstrapper boostrapper(context, scheme, scheme_algo, sk, encodingMatrix, 1);
+    // EncodingMatrix encodingMatrix(sk, scheme, 4, 4, 1);
+    // Bootstrapper boostrapper(context, scheme, scheme_algo, sk, encodingMatrix, 1);
         // boostrapper.addBootstrappingKey(sk);
 
 
     PCMM_Context pcmm_context(PCMM_N1, mlwe_rank, p_ringpack, q_ringpack, context);
-    PCMM_Scheme pcmm_scheme(pcmm_context, scheme, boostrapper, sk);
+    PCMM_Scheme pcmm_scheme(pcmm_context, scheme, sk);
 
     int pq_ringpack_count = pcmm_context.pq_ringpack.size();
 
@@ -165,7 +165,7 @@ int main(int argc, char* argv[])
 
 
             cuTimer.start();
-                pcmm_scheme.PPMM(plain_mat_device, mlwe_cipher_decomposed, mat_M, mat_N, PCMM_N1);
+                pcmm_scheme.PPMM(plain_mat_device, mlwe_cipher_decomposed, mat_M, mat_N, PCMM_N1, decomp_num);
             temp = cuTimer.stop();
             ppmm_time = min(ppmm_time, temp);
 

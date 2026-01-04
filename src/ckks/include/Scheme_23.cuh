@@ -226,7 +226,7 @@ void Scheme_23::multConstAndEqual(Ciphertext& cipher, double cnst)
     }
     for(int i = 0; i < cipher.l+1; i++)
     {
-        add_const_copy_vec[i] ·= scaled_cnst % context.qVec[i];
+        add_const_copy_vec[i] = scaled_cnst % context.qVec[i];
         add_const_copy_vec[i + 2*(L+1)] = x_Shoup(add_const_copy_vec[i], context.qVec[i]);
     }
     cudaMemcpy(add_const_buffer, add_const_copy_vec.data(), sizeof(uint64_tt) * add_const_copy_vec.size(), cudaMemcpyHostToDevice);

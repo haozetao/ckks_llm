@@ -79,8 +79,8 @@ float temp = 0;
     
     int is_STC_first = 1;
     SchemeAlgo scheme_algo(context, scheme, sk);
-    EncodingMatrix encodingMatrix(sk, scheme, 3, 3, is_STC_first);
-    Bootstrapper bootHelper(context, scheme, scheme_algo, sk, encodingMatrix, is_STC_first);
+    // EncodingMatrix encodingMatrix(sk, scheme, 3, 3, is_STC_first);
+    // Bootstrapper bootHelper(context, scheme, scheme_algo, sk, encodingMatrix, is_STC_first);
     //     bootHelper.addBootstrappingKey(sk);
     // Attention attention_scheme(context, scheme, scheme_algo, 128, 12, 64);
     Attention attention_scheme(context, scheme, scheme_algo, 128, 12, 64, sk);
@@ -140,9 +140,9 @@ float temp = 0;
     }
 
     /****************Verify ccmm *V ******************************/
-    // read_matrix_from_file("python/data/V.txt", mes1, slots);
-    // read_matrix_from_file("python/data/sigma_A_1.txt", mes2, slots);
-    // read_matrix_from_file("python/data/sigma_A_2.txt", mes3, slots);
+    read_matrix_from_file("python/data/V.txt", mes1, slots);
+    read_matrix_from_file("python/data/sigma_A_1.txt", mes2, slots);
+    read_matrix_from_file("python/data/sigma_A_2.txt", mes3, slots);
     /****************end Verify ccmm *V ******************************/
 
     cuDoubleComplex* complex_msg1, *complex_msg2, *complex_msg3;

@@ -14,9 +14,9 @@ public:
     PCMM_Context& pcmm_context;
     Scheme_23& scheme;
     Context_23& context;
-    Bootstrapper& bootstrapper;
+    // Bootstrapper& bootstrapper;
     SecretKey& sk;
-    PCMM_Scheme(PCMM_Context& pcmm_context, Scheme_23& scheme, Bootstrapper& bootstrapper, SecretKey& sk);
+    PCMM_Scheme(PCMM_Context& pcmm_context, Scheme_23& scheme, SecretKey& sk);
 
     uint64_tt* embeded_mlwe_buffer;
     vector<Key*> repackingKeys;
@@ -43,9 +43,6 @@ public:
     __host__ void PPMM(float* plain_mat, vector<MLWECiphertext*> mlwe_cipher_decomposed, int mat_M, int mat_N, int mat_K, int mlwe_num);
 
     __host__ void coeffBitRev(Ciphertext& rlwe_cipher);
-    __host__ void realData_coeffShift(Ciphertext& rlwe_cipher, int flag, int for_512);
 
-
-    __host__ void PCMM_Boot(float* plain_mat, Ciphertext& rlwe_cipher, vector<MLWECiphertext*>& mlwe_cipher_decomposed, int mat_M, int mat_N, int mat_K);
-    __host__ void test_PCMM_Boot(float* plain_mat, Ciphertext& rlwe_cipher, vector<MLWECiphertext*>& mlwe_cipher_decomposed, int mat_M, int mat_N, int mat_K);
+    // __host__ void PCMM_Boot(float* plain_mat, Ciphertext& rlwe_cipher, vector<MLWECiphertext*>& mlwe_cipher_decomposed, int mat_M, int mat_N, int mat_K);
 };

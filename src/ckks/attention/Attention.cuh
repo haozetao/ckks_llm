@@ -132,8 +132,8 @@ Attention::Attention(Context_23& context, Scheme_23& scheme, SchemeAlgo& scheme_
     // prepare mask for CCMM Q*K^T
     cout<<"prepare Q*K^T mask"<<endl;
     for(int i = 1; i < d; i<<=1){
-        Plaintext* mask_i = new Plaintext(N, L, L, slots, NTL::RR(pow(context.precision, 2.0/3)));
-        // Plaintext* mask_i = new Plaintext(N, L, L, slots, NTL::RR(context.precision));
+        // Plaintext* mask_i = new Plaintext(N, L, L, slots, NTL::RR(pow(context.precision, 2.0/3)));
+        Plaintext* mask_i = new Plaintext(N, L, L, slots, NTL::RR(context.precision));
         column_mask_ccmm.push_back(mask_i);
 
         vector<int> mask_idx;
@@ -148,8 +148,8 @@ Attention::Attention(Context_23& context, Scheme_23& scheme, SchemeAlgo& scheme_
         cudaMemcpy(column_mask_buffer_device, column_mask_buffer_host, sizeof(cuDoubleComplex) * slots, cudaMemcpyHostToDevice);
         context.encode(column_mask_buffer_device, *mask_i);
         
-        Plaintext* mask_i_other = new Plaintext(N, L, L, slots, NTL::RR(pow(context.precision, 0.6666)));
-        // Plaintext* mask_i_other = new Plaintext(N, L, L, slots, NTL::RR(context.precision));
+        // Plaintext* mask_i_other = new Plaintext(N, L, L, slots, NTL::RR(pow(context.precision, 0.6666)));
+        Plaintext* mask_i_other = new Plaintext(N, L, L, slots, NTL::RR(context.precision));
         column_mask_ccmm.push_back(mask_i_other);
         for (int idx = 0; idx < mask_idx.size(); idx++){
             mask_idx[idx] += i;
@@ -963,14 +963,16 @@ void Attention::Recursive_CCMM_reduce(Ciphertext& Q, Ciphertext& K, int layer, i
             *leafnode = **cipher_stack;
         }
         multAndEqual_23(**cipher_stack, Q);
-        if((**cipher_stack).scale > need_rescale)scheme.rescaleAndEqual(**cipher_stack);
+        // if((**cipher_stack).scale > need_rescale)scheme.rescaleAndEqual(**cipher_stack);
+        scheme.rescaleAndEqual(**cipher_stack);
         if (seq & 1)leftRotateAddSelf_23(**cipher_stack, 32768-1);
         else leftRotateAddSelf_23(**cipher_stack, 1);
         // scheme.decrypt_display(sk, **cipher_stack, "before mask");
         // cout << "before mult " << (**cipher_stack).scale << endl;
         scheme.multConstAndEqual(**cipher_stack, *column_mask_ccmm[(seq & 1)]);
         // cout << "after mult " << (**cipher_stack).scale << endl;
-        if((**cipher_stack).scale > need_rescale)scheme.rescaleAndEqual(**cipher_stack);
+        // if((**cipher_stack).scale > need_rescale)scheme.rescaleAndEqual(**cipher_stack);
+        scheme.rescaleAndEqual(**cipher_stack);
         return;
     }
     Recursive_CCMM_reduce(Q, K, layer + 1, max_layer, seq * 2, column_num, cipher_stack);
@@ -983,7 +985,8 @@ void Attention::Recursive_CCMM_reduce(Ciphertext& Q, Ciphertext& K, int layer, i
         // cout << "before mult " << (**cipher_stack).scale << endl;
         scheme.multConstAndEqual(**cipher_stack, *column_mask_ccmm[(seq & 1) + 2*(max_layer - layer)]);
         // cout << "after mult " << (**cipher_stack).scale << endl;
-        if((**cipher_stack).scale > need_rescale)scheme.rescaleAndEqual(**cipher_stack);
+        // if((**cipher_stack).scale > need_rescale)scheme.rescaleAndEqual(**cipher_stack);
+        scheme.rescaleAndEqual(**cipher_stack);
         // if (layer == max_layer - 1)scheme.decrypt_display(sk, **cipher_stack, "cipher_stack");
     }
     return;
