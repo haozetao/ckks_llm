@@ -23,6 +23,16 @@ public:
     vector<double> CDF_cheby_coeffs;
     vector<Chebyshev_Polynomial*> CDF_cheby_poly_pool;
 
+    double sigmoid_x_max;
+    vector<double> sigmoid_x_iter_2x_cheby_coeffs;
+    vector<Chebyshev_Polynomial*> sigmoid_x_iter_2x_cheby_poly_pool;
+
+    double cdf_x_max;
+    vector<double> CDF_x_iter_2x_cheby_coeffs;
+    vector<Chebyshev_Polynomial*> CDF_x_iter_2x_cheby_poly_pool;
+
+    Ciphertext* temp_cipher_nonlinear;
+
     int head_num;
     int d;
     int token_len;
