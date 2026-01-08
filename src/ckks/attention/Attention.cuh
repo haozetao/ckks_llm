@@ -7,6 +7,10 @@
 Attention::Attention(Context_23& context, Scheme_23& scheme, SchemeAlgo& scheme_algo, int token_len, int head_num, int d, SecretKey& sk)
     : context(context), scheme(scheme), scheme_algo(scheme_algo), token_len(token_len), head_num(head_num), d(d), sk(sk)
 {
+    if (scheme_algo.chebyshev_tree_pool.empty()) {
+        scheme_algo.malloc_bsgs_buffer(32);
+    }
+
     // exp(5(x-1)) 
     // x \in [-1, 1] -> [-10, 0]
     exp_cheby_coeffs = {0.18354081267894184, 0.32794453388908446, 0.23590381180224984, 0.1392214845586662, 
@@ -206,6 +210,8 @@ Attention::Attention(Context_23& context, Scheme_23& scheme, SchemeAlgo& scheme_
         cudaMemcpy(column_mask_buffer_device, column_mask_buffer_host, sizeof(cuDoubleComplex) * slots, cudaMemcpyHostToDevice);
         context.encode(column_mask_buffer_device, *mask_i_other);
     }
+
+    const int head_blocks = column_num / d;
     
     /******************************Q * K^T***********************************/
     // tmpcipher_buffer = (Ciphertext **)malloc(sizeof(Ciphertext) * (log2(d)+1));
@@ -222,7 +228,8 @@ Attention::Attention(Context_23& context, Scheme_23& scheme, SchemeAlgo& scheme_
     for (int j = 0; j < 8; j++){
         for(int i = 0; i < 8; i++){
             memset(rot_diag, 0, sizeof(cuDoubleComplex)*slots);
-            for (int k = 0; k < 512; k++){
+            const int repeats = slots / d;
+            for (int k = 0; k < repeats; k++){
                 rot_diag[j*8+i+k*64].x = 1;
                 // printf("%d, ",j*8+i+k*64);
             }
@@ -238,7 +245,7 @@ Attention::Attention(Context_23& context, Scheme_23& scheme, SchemeAlgo& scheme_
         memset(rot_diag, 0, sizeof(cuDoubleComplex)*slots);
         vector<int> mask_idx;
         // one ciphertext for four head
-        for (int k = 0; k < 4; k++){
+        for (int k = 0; k < head_blocks; k++){
             for (int j = 0; j < d-zero_column_num; j++){
                 mask_idx.push_back(j+k*d);
             }
@@ -253,7 +260,7 @@ Attention::Attention(Context_23& context, Scheme_23& scheme, SchemeAlgo& scheme_
         mask_ccmm_right[mask_column_num] = Plaintext(N, L, L, slots, NTL::RR(context.precision));
         memset(rot_diag, 0, sizeof(cuDoubleComplex)*slots);
         vector<int> mask_idx;
-        for (int k = 0; k < 4; k++){
+        for (int k = 0; k < head_blocks; k++){
             for (int j = 0; j < mask_column_num; j++){
                 mask_idx.push_back(d-j-1 + k*d);
             }
@@ -267,7 +274,7 @@ Attention::Attention(Context_23& context, Scheme_23& scheme, SchemeAlgo& scheme_
         mulV_gs_res[i] = scheme_algo.chebyshev_tree_pool[i];
     }
 
-    delete column_mask_buffer_host;
+    delete[] column_mask_buffer_host;
     cudaFree(column_mask_buffer_device);
 
     /****************************** end *V ***********************************/
@@ -291,40 +298,48 @@ void Attention::addKey(SecretKey& sk)
 {
     cout<<"add CCMM & reduce sum Keys"<<endl;
     printf("log2(d): %lf\n", log2(d));
+    int slots = context.slots;
+    int column_num = slots / token_len;
+    int head_blocks = column_num / d;
     // CCMM Q*K^T
     // softmax reduce sum
-    for(int i = 0; i < log2(d*4) + 1; i++){
-        scheme.addLeftRotKey_23(sk, 1 << i);
-        printf("%d, ", 1<<i);
-        scheme.addLeftRotKey_23(sk, 32768 - (1 << i));
-        printf("%d, ", 32768 - (1 << i));
+    int max_pow = 0;
+    while ((1 << max_pow) < d * head_blocks) {
+        max_pow++;
     }
-    scheme.addLeftRotKey_23(sk, 16384);
-        printf("%d, ", 16384);
-    scheme.addLeftRotKey_23(sk, 256);
-        printf("%d, ", 256);
-    scheme.addLeftRotKey_23(sk, 16 * 256);
-        printf("%d, ", 16 * 256);
+    for(int i = 0; i < max_pow + 1; i++){
+        int shift = 1 << i;
+        scheme.addLeftRotKey_23(sk, shift);
+        printf("%d, ", shift);
+        scheme.addLeftRotKey_23(sk, slots - shift);
+        printf("%d, ", slots - shift);
+    }
+    scheme.addLeftRotKey_23(sk, slots / 2);
+    printf("%d, ", slots / 2);
+    scheme.addLeftRotKey_23(sk, column_num);
+    printf("%d, ", column_num);
+    scheme.addLeftRotKey_23(sk, 16 * column_num);
+    printf("%d, ", 16 * column_num);
     // for tau gs
     for(int i = 0; i < 16; i++){
-        scheme.addLeftRotKey_23(sk, 256*4*i);
-        printf("%d, ", 256*8*i);
+        scheme.addLeftRotKey_23(sk, column_num * 4 * i);
+        printf("%d, ", column_num * 4 * i);
     }
     // for tau bs
     for(int i = 0; i < 4; i++){
-        scheme.addLeftRotKey_23(sk, 256*i);
-        printf("%d, ", 256*i);
+        scheme.addLeftRotKey_23(sk, column_num * i);
+        printf("%d, ", column_num * i);
     }
     // for *V
-    scheme.addLeftRotKey_23(sk, 32768-255);
-        printf("%d, ", 32768-64+1);
+    scheme.addLeftRotKey_23(sk, slots - (column_num - 1));
+    printf("%d, ", slots - (column_num - 1));
     cout<<endl;
-    scheme.addLeftRotKey_23(sk, 32768-64);
-        printf("%d, ", 32768-64+1);
+    scheme.addLeftRotKey_23(sk, slots - d);
+    printf("%d, ", slots - d);
     cout<<endl;
     for(int i = 0; i < mulV_bs; i++){
-        scheme.addLeftRotKey_23(sk, 256*i);
-        printf("%d, ", 256*i);
+        scheme.addLeftRotKey_23(sk, column_num * i);
+        printf("%d, ", column_num * i);
     }
 }
 
@@ -368,6 +383,7 @@ void Attention::evalCDF(Ciphertext& cipher)
     NTL::RR target_scale = cipher.scale;
 
     scheme_algo.evalPolynomialChebyshev(cipher, target_scale, CDF_cheby_poly_pool);
+    // Evaluate sigmoid(2x) from sigmoid(x)
     target_scale = cipher.scale;
     for(int i = 0; i < iter; i++){
         scheme.multConstAndEqual(cipher, 2);
@@ -386,6 +402,7 @@ void Attention::evalSigmoid(Ciphertext& cipher)
 
     scheme_algo.evalPolynomialChebyshev(cipher, target_scale, sigmoid_cheby_poly_pool);
 
+    // Evaluate sigmoid(2x) from sigmoid(x)
     target_scale = cipher.scale;
     for(int i = 0; i < iter; i++){
         scheme_algo.evalPolynomialChebyshev(cipher, target_scale, sigmoid_x_iter_2x_cheby_poly_pool);
@@ -626,7 +643,7 @@ void Attention::evalSoftMax(vector<Ciphertext*>& cipher_P)
 
         // repeate
         for(int j = 0; j < log2(d); j++){
-            scheme.leftRotateAddSelf_23(*nonlieanr_buffer[1], 32768 - (1 << j));
+            scheme.leftRotateAddSelf_23(*nonlieanr_buffer[1], context.slots - (1 << j));
         }
         if(i == 0){
             *nonlieanr_buffer[0] = *nonlieanr_buffer[1];
@@ -695,7 +712,7 @@ void Attention::FASHE_evalSoftMax(vector<Ciphertext*>& cipher_P, SecretKey& sk)
 
                 // repeate
                 for(int j = 0; j < log2(d); j++){
-                    scheme.leftRotateAddSelf_23(*nonlieanr_buffer[1], 32768 - (1 << j));
+                    scheme.leftRotateAddSelf_23(*nonlieanr_buffer[1], context.slots - (1 << j));
                 }
                 if(i == 0){
                     *nonlieanr_buffer[0] = *nonlieanr_buffer[1];
@@ -789,7 +806,7 @@ void Attention::evalSoftMax_phase2(vector<Ciphertext*>& cipher_P, SecretKey& sk)
 
         // repeate
         for(int j = 0; j < log2(d); j++){
-            scheme.leftRotateAddSelf_23(*nonlieanr_buffer[1], 32768 - (1 << j));
+            scheme.leftRotateAddSelf_23(*nonlieanr_buffer[1], context.slots - (1 << j));
         }
         if(i == 0){
             *nonlieanr_buffer[0] = *nonlieanr_buffer[1];
@@ -838,7 +855,7 @@ void Attention::LayerNorm(vector<Ciphertext*>& cipher, SecretKey& sk)
 
     // repeate
     for(int j = 0; j < log2(column_num); j++){
-        scheme.leftRotateAddSelf_23(*sum_x, 32768 - (1 << j));
+        scheme.leftRotateAddSelf_23(*sum_x, slots - (1 << j));
     }
     // scheme.decrypt_display(sk, *sum_x, "repeate");
 
@@ -873,7 +890,7 @@ void Attention::LayerNorm(vector<Ciphertext*>& cipher, SecretKey& sk)
 
     // repeate
     for(int j = 0; j < log2(column_num); j++){
-        scheme.leftRotateAddSelf_23(*sum_x, 32768 - (1 << j));
+        scheme.leftRotateAddSelf_23(*sum_x, slots - (1 << j));
     }
     // add epsilon to avoid divide zero
     // scheme.addConstAndEqual(*sum_x, 1e-5);
@@ -924,7 +941,7 @@ void Attention::LayerNorm_Bert(vector<Ciphertext*>& cipher, SecretKey& sk)
 
     // repeate
     for(int j = 0; j < log2(column_num); j++){
-        scheme.leftRotateAddSelf_23(*sum_x, 32768 - (1 << j));
+        scheme.leftRotateAddSelf_23(*sum_x, slots - (1 << j));
     }
     scheme.decrypt_display(sk, *sum_x, "repeate");
 
@@ -964,7 +981,7 @@ void Attention::LayerNorm_Bert(vector<Ciphertext*>& cipher, SecretKey& sk)
 
     // repeate
     for(int j = 0; j < log2(column_num); j++){
-        scheme.leftRotateAddSelf_23(*sum_x, 32768 - (1 << j));
+        scheme.leftRotateAddSelf_23(*sum_x, slots - (1 << j));
     }
     // add epsilon to avoid divide zero
     // scheme.addConstAndEqual(*sum_x, 1e-5);
@@ -1016,6 +1033,7 @@ void Attention::CCMM_QK(Ciphertext& Q, Ciphertext& K, Ciphertext& O1, Ciphertext
 
 void Attention::Recursive_CCMM_reduce(Ciphertext& Q, Ciphertext& K, int layer, int max_layer, int seq, int column_num, Ciphertext** cipher_stack)
 {
+    int slots = context.slots;
     if(layer == max_layer){
         **cipher_stack = *leafnode;
         if(seq){
@@ -1025,7 +1043,7 @@ void Attention::Recursive_CCMM_reduce(Ciphertext& Q, Ciphertext& K, int layer, i
         multAndEqual_23(**cipher_stack, Q);
         // if((**cipher_stack).scale > need_rescale)scheme.rescaleAndEqual(**cipher_stack);
         scheme.rescaleAndEqual(**cipher_stack);
-        if (seq & 1)leftRotateAddSelf_23(**cipher_stack, 32768-1);
+        if (seq & 1)leftRotateAddSelf_23(**cipher_stack, slots - 1);
         else leftRotateAddSelf_23(**cipher_stack, 1);
         // scheme.decrypt_display(sk, **cipher_stack, "before mask");
         // cout << "before mult " << (**cipher_stack).scale << endl;
@@ -1040,7 +1058,7 @@ void Attention::Recursive_CCMM_reduce(Ciphertext& Q, Ciphertext& K, int layer, i
     scheme.addAndEqual(**cipher_stack, **(cipher_stack+1));
     // if (layer == 5) scheme.decrypt_display(sk, **cipher_stack, "");
     if (layer > 0){
-        if (seq & 1) leftRotateAddSelf_23(**cipher_stack, 32768 - (1 << (max_layer - layer)));
+        if (seq & 1) leftRotateAddSelf_23(**cipher_stack, slots - (1 << (max_layer - layer)));
         else leftRotateAddSelf_23(**cipher_stack, (1 << (max_layer - layer)));
         // cout << "before mult " << (**cipher_stack).scale << endl;
         scheme.multConstAndEqual(**cipher_stack, *column_mask_ccmm[(seq & 1) + 2*(max_layer - layer)]);
@@ -1121,7 +1139,7 @@ void Attention::TauAndEqual(Ciphertext& A)
 
     for (int i = 0; i < baby_steps; i++){
         *tmpcipher_buffer[i] = A;
-        if(i>0)leftRotateAndEqual_23(*tmpcipher_buffer[i], 256*i);
+        if(i>0)leftRotateAndEqual_23(*tmpcipher_buffer[i], (context.slots / token_len) * i);
     }
 
     for (int j = 0; j < giant_steps; j++){
@@ -1142,7 +1160,7 @@ void Attention::TauAndEqual(Ciphertext& A)
             A = *tmp_result_bs;
         }
         else{
-            leftRotateAndEqual_23(*tmp_result_bs, 256*baby_steps*j);
+            leftRotateAndEqual_23(*tmp_result_bs, (context.slots / token_len) * baby_steps * j);
             scheme.addAndEqual(A, *tmp_result_bs);
         }
     }
@@ -1174,8 +1192,8 @@ void Attention::CCMM_V(Ciphertext& sigma_O1, Ciphertext& sigma_O2, Ciphertext& t
     int offset = 0;
     for (int i = 0; i < mulV_bs; i++){
         if (i > 0){
-            leftRotateAndEqual_23(*temp_rot1, 32768-255);
-            leftRotateAndEqual_23(*temp_rot2, 32768-255);
+            leftRotateAndEqual_23(*temp_rot1, slots - (column_num - 1));
+            leftRotateAndEqual_23(*temp_rot2, slots - (column_num - 1));
         }
         *mat1 = *temp_rot1;
         *mat3 = *temp_rot2;
@@ -1186,9 +1204,9 @@ void Attention::CCMM_V(Ciphertext& sigma_O1, Ciphertext& sigma_O2, Ciphertext& t
                 leftRotateAndEqual_23(*mat3, mulV_bs);
             }
             *mat4 = *mat1;
-            leftRotateAndEqual_23(*mat4, 32768-64);
+            leftRotateAndEqual_23(*mat4, slots - d);
             *mat2 = *mat3;
-            leftRotateAndEqual_23(*mat2, 32768-64);
+            leftRotateAndEqual_23(*mat2, slots - d);
 
             *temp_mul1 = *mat1;
             *temp_mul2 = *mat2;
@@ -1225,7 +1243,7 @@ void Attention::CCMM_V(Ciphertext& sigma_O1, Ciphertext& sigma_O2, Ciphertext& t
             O = *temp_res;
         }
         else{
-            leftRotateAndEqual_23(*temp_res, 256*i);
+            leftRotateAndEqual_23(*temp_res, column_num * i);
             scheme.addAndEqual(O, *temp_res);
         }
     }
