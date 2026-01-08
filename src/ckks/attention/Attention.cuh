@@ -35,11 +35,19 @@ Attention::Attention(Context_23& context, Scheme_23& scheme, SchemeAlgo& scheme_
     //     -2.0072697268355913e-17, 0.035317888765259355, -1.0917210757920756e-16, -0.010693712782924763, 
     //     -1.8652562430325655e-16, 0.003260293428351401, -2.2019441004172328e-16, -0.0009931752451993756, 
     //     -9.895698703494615e-18, 0.00029550137814745605, -1.761892554953261e-17, -6.453127146099342e-05};
-    sigmoid_cheby_coeffs = {0.4999999999999999, 0.5876811283760183, -1.2245589764298666e-16, -0.12149626092930495, 
-        9.11654200268892e-17, 0.03531796339510528, 2.500215614893023e-16, -0.010693957687070982, 
-        2.6705411550039875e-16, 0.0032610953439276167, 4.965267385241698e-16, -0.000995800506585915, 
-        5.013755013555445e-16, 0.00030409563293387924, 2.66463491171798e-16, -9.266603859557535e-05, 
-        5.512919147316323e-16, 2.757290625878708e-05, 3.833288719350705e-16, -6.021416971387329e-06};
+    // sigmoid_cheby_coeffs = {0.4999999999999999, 0.5876811283760183, -1.2245589764298666e-16, -0.12149626092930495, 
+    //     9.11654200268892e-17, 0.03531796339510528, 2.500215614893023e-16, -0.010693957687070982, 
+    //     2.6705411550039875e-16, 0.0032610953439276167, 4.965267385241698e-16, -0.000995800506585915, 
+    //     5.013755013555445e-16, 0.00030409563293387924, 2.66463491171798e-16, -9.266603859557535e-05, 
+    //     5.512919147316323e-16, 2.757290625878708e-05, 3.833288719350705e-16, -6.021416971387329e-06};
+    sigmoid_cheby_coeffs = {0.49999999999999983, 0.6190561249910002, -3.779948047650626e-16, -0.16826527291908855, 
+        -1.912969045814174e-16, 0.07086825138977516, 2.597786544428372e-16, -0.03212482603897069, 
+        3.589248098772761e-17, 0.014825676200313642, -1.1719743484722945e-16, -0.006875368855731378, 
+        2.2107731351872553e-16, 0.003192797680713223, -2.0128123752342198e-16, -0.0014832571008630544, 
+        8.831562613597343e-16, 0.0006891406846301364, 2.741745067338399e-16, -0.00032018501678578935, 
+        8.444549204356228e-16, 0.00014874420322440814, 4.574944982035514e-16, -6.905745663065152e-05, 
+        2.2032077969240172e-16, 3.196897811145114e-05, 5.390316225920323e-16, -1.4600593693464791e-05, 
+        6.80826518041179e-16, 6.238592363887885e-06, 3.2031350231224433e-16, -1.7248688345201689e-06};
     int sigmoid_tree_node_num = 1<<int(ceil(log2(sigmoid_cheby_coeffs.size())));
     for(int i = 0; i < sigmoid_tree_node_num; i++)
     {
@@ -54,16 +62,34 @@ Attention::Attention(Context_23& context, Scheme_23& scheme, SchemeAlgo& scheme_
 
         scheme_algo.call_prepareChebyshevCoeffsTree(logSplit, logDegree, 1, sigmoid_cheby_poly_pool);
     }
-    
+    sigmoid_x_max = 8;
+
+    sigmoid_x_iter_2x_cheby_coeffs = {0.39135661064466676, 0.4311355190020014, 0.29684494955071405, 0.003438274502918351, 
+        -0.10094472423159448, -0.053088638542605315, 0.007633927547045461, 0.022294214131234984, 
+        0.008820873471426465, -0.0031790881125600147, -0.004686461144646479, -0.0013095091946053207, 
+        0.0009484847435840586, 0.0009406999216865256, 0.0001556118752286015, -0.00024556942168665153, 
+        -0.00017996299374255673, -7.596639137797628e-06, 5.8616228847240585e-05, 3.279028127733078e-05, 
+        -3.4063866112867723e-06, -1.3616968671623255e-05, -5.935806433449409e-06, 2.521040148190015e-06};
+    int sigmoid_x_iter_2x_tree_node_num = 1<<int(ceil(log2(sigmoid_x_iter_2x_cheby_coeffs.size())));
+    for(int i = 0; i < sigmoid_x_iter_2x_tree_node_num; i++)
+    {
+        sigmoid_x_iter_2x_cheby_poly_pool.push_back(new Chebyshev_Polynomial());
+    }
+    sigmoid_x_iter_2x_cheby_poly_pool[1]->coeffs = sigmoid_x_iter_2x_cheby_coeffs;
+    sigmoid_x_iter_2x_cheby_poly_pool[1]->maxDegree = sigmoid_x_iter_2x_cheby_coeffs.size() - 1;
+    {
+        int degree = sigmoid_x_iter_2x_cheby_poly_pool[1]->degree();
+        int logDegree = ceil(log2(degree));
+        int logSplit = (logDegree >> 1);
+
+        scheme_algo.call_prepareChebyshevCoeffsTree(logSplit, logDegree, 1, sigmoid_x_iter_2x_cheby_poly_pool);
+    }
+
     // CDF_cheby_coeffs = {0.5, 0.6234577610429392, 8.07567900971873e-17, -0.17602452170600366, 
     //     1.1776422425135919e-16, 0.0761747991351066, -1.2929493435476463e-16, -0.03371833834600424, 
     //     -1.6116422569495642e-16, 0.014111526810286363, -2.0330980266310844e-16, -0.005444024438389357, 
     //     -1.224401966956653e-16, 0.0018840923558029613, -4.5685761667957374e-17, -0.0004415815053097376};
-    CDF_cheby_coeffs = {0.4999999999999999, 0.6234577655281024, 2.1938197590748047e-17, -0.17602455084661336, 
-        3.8397062060234874e-17, 0.07617494799506995, 2.5058771037119205e-16, -0.03371905009934949, 
-        1.9442573437879256e-16, 0.014114717269537384, 6.136919126806236e-16, -0.005457385541723384, 
-        5.961195387018996e-16, 0.0019361656181797757, 2.3980071897640697e-16, -0.0006296867994589113, 
-        5.853325473071143e-16, 0.00018562210307973312, 3.963861460495831e-16, -3.883187839606411e-05};
+    CDF_cheby_coeffs = {0.49999999999999983, 0.6315854460608845, -3.8007362690147523e-16, -0.19758285625101127, -2.6928769802283985e-16, 0.10444703623487543, 3.3013421842775765e-16, -0.06173815279554332, -6.365934059249024e-17, 0.037352705565676415, -1.2762246142446612e-16, -0.022368752712872825, 2.052864515595652e-16, 0.013050442364969566, -3.1643334912463447e-16, -0.0073560603063709045, 8.572315590623611e-16, 0.003987549158219894, 1.901223608737585e-16, -0.0020735719558088446, 7.054569286734498e-16, 0.0010330783868063083, 5.506038234887787e-16, -0.0004928276902164144, 2.1704922439447746e-16, 0.00022494605544299398, 4.0420673305027137e-16, -9.775200192125993e-05, 5.534540149915478e-16, 3.899079251192208e-05, 3.769570264744171e-16, -1.0220905643195679e-05};
     int CDF_tree_node_num = 1<<int(ceil(log2(CDF_cheby_coeffs.size())));
     for(int i = 0; i < CDF_tree_node_num; i++)
     {
@@ -78,6 +104,28 @@ Attention::Attention(Context_23& context, Scheme_23& scheme, SchemeAlgo& scheme_
 
         scheme_algo.call_prepareChebyshevCoeffsTree(logSplit, logDegree, 1, CDF_cheby_poly_pool);
     }
+    cdf_x_max = 8;
+
+    CDF_x_iter_2x_cheby_coeffs = {0.5, 0.5916790537958231, 3.27552742097307e-17, -0.10748392237973169, 
+        1.067701425180745e-16, 0.01646575746789658, -9.446121881423479e-17, -0.0005779701033667785, 
+        -1.7913841602730062e-16, -6.743358384228921e-05, -5.745378466006292e-17, -1.1670517637866644e-05, 
+        -6.298564631679064e-17, -2.7882304899101934e-06, -4.080318978588528e-17, -1.0264486512245965e-06};
+    int CDF_x_iter_2x_tree_node_num = 1<<int(ceil(log2(CDF_x_iter_2x_cheby_coeffs.size())));
+    for(int i = 0; i < CDF_x_iter_2x_tree_node_num; i++)
+    {
+        CDF_x_iter_2x_cheby_poly_pool.push_back(new Chebyshev_Polynomial());
+    }
+    CDF_x_iter_2x_cheby_poly_pool[1]->coeffs = CDF_x_iter_2x_cheby_coeffs;
+    CDF_x_iter_2x_cheby_poly_pool[1]->maxDegree = CDF_x_iter_2x_cheby_coeffs.size() - 1;
+    {
+        int degree = CDF_x_iter_2x_cheby_poly_pool[1]->degree();
+        int logDegree = ceil(log2(degree));
+        int logSplit = (logDegree >> 1);
+
+        scheme_algo.call_prepareChebyshevCoeffsTree(logSplit, logDegree, 1, CDF_x_iter_2x_cheby_poly_pool);
+    }
+
+    temp_cipher_nonlinear = new Ciphertext(context.N, context.L, context.L, context.slots, NTL::to_RR(context.precision));
     
     softmax_x_max = 5;
     activate_x_max = 5;
@@ -158,8 +206,6 @@ Attention::Attention(Context_23& context, Scheme_23& scheme, SchemeAlgo& scheme_
         cudaMemcpy(column_mask_buffer_device, column_mask_buffer_host, sizeof(cuDoubleComplex) * slots, cudaMemcpyHostToDevice);
         context.encode(column_mask_buffer_device, *mask_i_other);
     }
-    delete column_mask_buffer_host;
-    cudaFree(column_mask_buffer_device);
     
     /******************************Q * K^T***********************************/
     // tmpcipher_buffer = (Ciphertext **)malloc(sizeof(Ciphertext) * (log2(d)+1));
@@ -220,6 +266,9 @@ Attention::Attention(Context_23& context, Scheme_23& scheme, SchemeAlgo& scheme_
     for (int i = 0; i < mulV_gs; i++){
         mulV_gs_res[i] = scheme_algo.chebyshev_tree_pool[i];
     }
+
+    delete column_mask_buffer_host;
+    cudaFree(column_mask_buffer_device);
 
     /****************************** end *V ***********************************/
 }
@@ -313,28 +362,39 @@ void Attention::evalExp_iter(Ciphertext& cipher, int iter)
 // CDF function: 0.5 * (1 + erf(x / sqrt(2)))
 void Attention::evalCDF(Ciphertext& cipher)
 {
-    scheme.multConstAndEqual(cipher, 1./activate_x_max);
+    int iter = 3;
+    scheme.multConstAndEqual(cipher, 1./cdf_x_max/(1<<iter));
     scheme.rescaleAndEqual(cipher);
     NTL::RR target_scale = cipher.scale;
 
-    // Evaluate the Chebyshev polynomial for 0.5 * (1 + erf(x / sqrt(2)))
     scheme_algo.evalPolynomialChebyshev(cipher, target_scale, CDF_cheby_poly_pool);
+    target_scale = cipher.scale;
+    for(int i = 0; i < iter; i++){
+        scheme.multConstAndEqual(cipher, 2);
+        scheme.addConstAndEqual(cipher, -1);
+        scheme_algo.evalPolynomialChebyshev(cipher, target_scale, CDF_x_iter_2x_cheby_poly_pool);
+    }
 }
 
 // Sigmoid function: exp(x) / (1 + exp(x))
 void Attention::evalSigmoid(Ciphertext& cipher)
 {
-    scheme.multConstAndEqual(cipher, 1./activate_x_max);
+    int iter = 3;
+    scheme.multConstAndEqual(cipher, 1./sigmoid_x_max/pow(2, iter));
     scheme.rescaleAndEqual(cipher);
     NTL::RR target_scale = cipher.scale;
 
-    // Evaluate the Chebyshev polynomial for 0.5 * (1 + erf(x / sqrt(2)))
     scheme_algo.evalPolynomialChebyshev(cipher, target_scale, sigmoid_cheby_poly_pool);
+
+    target_scale = cipher.scale;
+    for(int i = 0; i < iter; i++){
+        scheme_algo.evalPolynomialChebyshev(cipher, target_scale, sigmoid_x_iter_2x_cheby_poly_pool);
+    }
 }
 
 void Attention::evalGeLU(Ciphertext& cipher)
 {
-    Ciphertext* mult_buffer = scheme_algo.chebyshev_tree_pool[0];
+    Ciphertext* mult_buffer = temp_cipher_nonlinear;
     *mult_buffer = cipher;
     evalCDF(cipher);
     scheme.multAndEqual_23(cipher, *mult_buffer);
@@ -343,7 +403,7 @@ void Attention::evalGeLU(Ciphertext& cipher)
 
 void Attention::evalSiLU(Ciphertext& cipher)
 {
-    Ciphertext* mult_buffer = scheme_algo.chebyshev_tree_pool[0];
+    Ciphertext* mult_buffer = temp_cipher_nonlinear;
     *mult_buffer = cipher;
     evalSigmoid(cipher);
     scheme.multAndEqual_23(cipher, *mult_buffer);
